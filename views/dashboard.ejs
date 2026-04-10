@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard · AI Apps</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <%- include('partials/header', { role }) %>
+
+  <main>
+    <div class="container">
+      <div class="card" style="background: linear-gradient(145deg, #ffffff 0%, #fffaf5 100%);">
+        <h2>👋 Welcome back, <%= email %></h2>
+        <p style="font-size: 1.1rem;">Your intelligent workspace is ready. Select a tool below.</p>
+      </div>
+
+      <div class="dashboard-grid">
+        <a href="/profile" class="tool-card">
+          <h3>🔐 2FA & Profile</h3>
+          <p>Manage your account security and enable Google Authenticator</p>
+        </a>
+        <% if (role === 'admin') { %>
+          <a href="/admin/users" class="tool-card">
+            <h3>👥 User Management</h3>
+            <p>Admin panel to create, edit, and manage system users</p>
+          </a>
+        <% } %>
+        <a href="/tools/calculator" class="tool-card">
+          <h3>🧮 Calculator Tool</h3>
+          <p>Perform quick calculations with a clean interface</p>
+        </a>
+        <!-- Future tools can be added here -->
+        <div class="tool-card" style="opacity:0.7;">
+          <h3>📊 Analytics</h3>
+          <p>Coming soon...</p>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <%- include('partials/footer') %>
+</body>
+</html>

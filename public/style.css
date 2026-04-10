@@ -1,0 +1,340 @@
+/* Modern Professional Theme */
+:root {
+  --primary: #ff7a00;
+  --primary-light: #ffa64d;
+  --bg-light: #fff7f0;
+  --text-dark: #333;
+  --card-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+  --border-radius: 16px;
+  --transition: all 0.2s ease;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+}
+
+body {
+  font-family: 'Segoe UI', Roboto, system-ui, sans-serif;
+  background-color: var(--bg-light);
+  color: var(--text-dark);
+  line-height: 1.5;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Header */
+header {
+  background: linear-gradient(135deg, var(--primary) 0%, #e06e00 100%);
+  color: white;
+  padding: 1.5rem 2rem;
+  text-align: center;
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+/* Navigation */
+nav {
+  background-color: white;
+  display: flex;
+  justify-content: center;
+  gap: 2rem;
+  padding: 0.75rem 2rem;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
+  flex-wrap: wrap;
+}
+
+nav a {
+  color: var(--text-dark);
+  text-decoration: none;
+  font-weight: 600;
+  padding: 0.5rem 0.75rem;
+  border-radius: 40px;
+  transition: var(--transition);
+  font-size: 1rem;
+}
+
+nav a:hover {
+  background-color: var(--primary-light);
+  color: white;
+}
+
+/* Main content area */
+main {
+  flex: 1;
+  max-width: 1400px;
+  margin: 2rem auto;
+  padding: 0 2rem;
+  width: 100%;
+}
+
+/* Cards (for tools, forms, dashboard items) */
+.card {
+  background: white;
+  border-radius: var(--border-radius);
+  box-shadow: var(--card-shadow);
+  padding: 2rem;
+  margin: 1rem 0;
+  transition: var(--transition);
+  border: 1px solid rgba(0, 0, 0, 0.02);
+}
+
+.card:hover {
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.12);
+  transform: translateY(-2px);
+}
+
+.card h2, .card h3 {
+  color: var(--primary);
+  margin-bottom: 1.5rem;
+  font-weight: 600;
+  border-bottom: 2px solid var(--primary-light);
+  padding-bottom: 0.75rem;
+}
+
+/* Dashboard grid for tool cards */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 2rem;
+  margin-top: 2rem;
+}
+
+.tool-card {
+  background: white;
+  border-radius: var(--border-radius);
+  padding: 2rem 1.5rem;
+  text-align: center;
+  box-shadow: var(--card-shadow);
+  transition: var(--transition);
+  border: 1px solid rgba(0, 0, 0, 0.02);
+  text-decoration: none;
+  color: var(--text-dark);
+  display: block;
+}
+
+.tool-card:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 16px 32px rgba(255, 122, 0, 0.12);
+  border-color: var(--primary-light);
+}
+
+.tool-card h3 {
+  color: var(--primary);
+  font-size: 1.6rem;
+  margin-bottom: 0.75rem;
+  border: none;
+  padding: 0;
+}
+
+.tool-card p {
+  color: #666;
+  font-size: 0.95rem;
+}
+
+/* Forms */
+input, select, button {
+  display: block;
+  width: 100%;
+  padding: 0.85rem 1rem;
+  margin: 1rem 0;
+  border: 2px solid #e0e0e0;
+  border-radius: 12px;
+  font-size: 1rem;
+  transition: var(--transition);
+  font-family: inherit;
+}
+
+input:focus, select:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(255, 122, 0, 0.15);
+}
+
+button {
+  background-color: var(--primary);
+  color: white;
+  border: none;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: 40px;
+  padding: 0.9rem;
+  font-size: 1.05rem;
+  transition: var(--transition);
+  box-shadow: 0 4px 10px rgba(255, 122, 0, 0.2);
+}
+
+button:hover {
+  background-color: #e06e00;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 18px rgba(255, 122, 0, 0.3);
+}
+
+button.secondary {
+  background-color: white;
+  color: var(--primary);
+  border: 2px solid var(--primary);
+  box-shadow: none;
+}
+
+button.secondary:hover {
+  background-color: var(--primary-light);
+  color: white;
+}
+
+/* Tables (for admin users) */
+.table-container {
+  overflow-x: auto;
+  margin: 1.5rem 0;
+}
+
+table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: white;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: var(--card-shadow);
+}
+
+th {
+  background-color: var(--primary);
+  color: white;
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.85rem;
+  letter-spacing: 0.5px;
+  padding: 1rem 1.2rem;
+  text-align: left;
+}
+
+td {
+  padding: 1rem 1.2rem;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+tr:last-child td {
+  border-bottom: none;
+}
+
+tr:hover td {
+  background-color: #fffaf5;
+}
+
+/* Action buttons in table */
+.action-link {
+  color: var(--primary);
+  text-decoration: none;
+  font-weight: 500;
+  margin-right: 1rem;
+}
+
+.action-link:hover {
+  text-decoration: underline;
+}
+
+.btn-delete {
+  background: none;
+  border: none;
+  color: #d32f2f;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 0;
+  width: auto;
+  display: inline;
+  box-shadow: none;
+  margin: 0;
+}
+
+.btn-delete:hover {
+  background: none;
+  color: #b71c1c;
+  text-decoration: underline;
+  transform: none;
+  box-shadow: none;
+}
+
+/* Alerts / Messages */
+.alert {
+  padding: 1rem 1.5rem;
+  border-radius: 40px;
+  margin-bottom: 1.5rem;
+  font-weight: 500;
+  display: inline-block;
+}
+
+.alert-success {
+  background-color: #e6f7e6;
+  color: #2e7d32;
+  border-left: 6px solid #4caf50;
+}
+
+.alert-error {
+  background-color: #ffebee;
+  color: #c62828;
+  border-left: 6px solid #f44336;
+}
+
+/* QR code styling */
+.qr-container {
+  text-align: center;
+  margin: 2rem 0;
+}
+
+.qr-container img {
+  border-radius: 20px;
+  box-shadow: var(--card-shadow);
+  padding: 1rem;
+  background: white;
+  max-width: 220px;
+}
+
+.secret-code {
+  background: #f5f5f5;
+  padding: 0.75rem 1.5rem;
+  border-radius: 40px;
+  font-family: monospace;
+  font-size: 1.2rem;
+  display: inline-block;
+  margin: 1rem 0;
+}
+
+/* Footer */
+footer {
+  background-color: var(--primary);
+  color: white;
+  text-align: center;
+  padding: 1.2rem;
+  font-size: 0.9rem;
+  margin-top: 2rem;
+  border-top: 4px solid var(--primary-light);
+}
+
+/* Utility */
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.text-center { text-align: center; }
+.mt-2 { margin-top: 1rem; }
+.mb-2 { margin-bottom: 1rem; }
+
+/* Login / small forms special container */
+.auth-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(100vh - 200px);
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 420px;
+  margin: 2rem;
+}

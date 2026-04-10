@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>User Management · Admin</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <%- include('../partials/header', { role }) %>
+
+  <main>
+    <div class="container">
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <h2 style="border-bottom:none; margin-bottom:0;">👥 User Management</h2>
+          <a href="/admin/users/create"><button style="width:auto; padding:0.7rem 2rem;">➕ New User</button></a>
+        </div>
+
+        <% if (typeof success !== 'undefined' && success) { %>
+          <div class="alert alert-success"><%= success %></div>
+        <% } %>
+        <% if (typeof error !== 'undefined' && error) { %>
+          <div class="alert alert-error"><%= error %></div>
+        <% } %>
+
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr><th>ID</th><th>Email</th><th>Role</th><th>2FA</th><th>Actions</th></tr>
+            </thead>
+            <tbody>
+              <% users.forEach(user => { %>
+                <tr>
+                  <td><%= user.id %></td>
+                  <td><%= user.email %></td>
+                  <td><span style="text-transform:capitalize; font-weight:600;"><%= user.role %></span></td>
+                  <td><%= user.twofa_enabled ? '✅' : '❌' %></td>
+                  <td>
+                    <a href="/admin/users/<%= user.id %>/edit" class="action-link">Edit</a>
+                    <% if (user.id != currentUserId) { %>
+                      <form method="POST" action="/admin/users/<%= user.id %>/delete" style="display:inline;" onsubmit="return confirm('Delete this user permanently?');">
+                        <button type="submit" class="btn-delete">Delete</button>
+                      </form>
+                    <% } else { %>
+                      <span style="color:#999;">(you)</span>
+                    <% } %>
+                  </td>
+                </tr>
+              <% }) %>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <%- include('../partials/footer', { role }) %>
+</body>
+</html>

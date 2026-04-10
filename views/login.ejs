@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login · AI Apps</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body style="background: linear-gradient(135deg, #ff7a00 0%, #ffa64d 100%);">
+  <div class="auth-wrapper">
+    <div class="auth-card card">
+      <h2 style="text-align:center; border-bottom:none;">🔑 Secure Login</h2>
+      <% if (typeof error !== 'undefined' && error) { %>
+        <div class="alert alert-error"><%= error %></div>
+      <% } %>
+      <form method="POST" action="/login">
+        <input type="email" name="email" placeholder="Email address" required autofocus>
+        <input type="password" name="password" placeholder="Password" required>
+        <label style="font-weight:600; margin-bottom:0.25rem; display:block;"><%= captchaQuestion %></label>
+        <input type="text" name="captcha" placeholder="Answer" required>
+        <button type="submit">Sign In</button>
+      </form>
+      <p style="text-align:center; margin-top:1.5rem;">Contact administrator for account</p>
+    </div>
+  </div>
+</body>
+</html>

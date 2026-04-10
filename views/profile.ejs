@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Profile & 2FA · AI Apps</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <%- include('partials/header', { role }) %>
+
+  <main>
+    <div class="container">
+      <div class="card">
+        <h2>👤 Profile: <%= email %></h2>
+        <p style="margin-bottom:1.5rem;">Two-Factor Authentication: 
+          <strong style="color:<%= twofaEnabled ? '#2e7d32' : '#d32f2f' %>;">
+            <%= twofaEnabled ? '✅ Enabled' : '❌ Disabled' %>
+          </strong>
+        </p>
+
+        <% if (typeof success !== 'undefined' && success) { %>
+          <div class="alert alert-success"><%= success %></div>
+        <% } %>
+        <% if (typeof error !== 'undefined' && error) { %>
+          <div class="alert alert-error"><%= error %></div>
+        <% } %>
+
+        <% if (!twofaEnabled) { %>
+          <% if (!qrCode) { %>
+            <form method="POST" action="/profile/enable-2fa">
+              <button type="submit" style="max-width:280px;">➕ Enable Google Authenticator</button>
+            </form>
+          <% } else { %>
+            <h3>📱 Scan QR Code</h3>
+            <div class="qr-container">
+              <img src="<%= qrCode %>" alt="QR Code">
+            </div>
+            <p>Or enter secret manually:</p>
+            <code class="secret-code"><%= secret %></code>
+            <form method="POST" action="/profile/verify-2fa" style="margin-top:2rem;">
+              <input type="text" name="token" placeholder="6-digit verification code" required>
+              <button type="submit">✅ Verify & Activate 2FA</button>
+            </form>
+          <% } %>
+        <% } else { %>
+          <div class="alert alert-success" style="display:block;">🔒 Two-factor authentication is active on your account.</div>
+        <% } %>
+      </div>
+    </div>
+  </main>
+
+  <%- include('partials/footer') %>
+</body>
+</html>

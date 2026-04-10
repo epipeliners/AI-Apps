@@ -1,0 +1,10 @@
+<header>✨ AI Apps Dashboard</header>
+<nav>
+  <a href="/dashboard">🏠 Home</a>
+  <a href="/profile">🔐 Profile & 2FA</a>
+  <% if (typeof role !== 'undefined' && role === 'admin') { %>
+    <a href="/admin/users">👥 Manage Users</a>
+  <% } %>
+  <a href="/tools/calculator">🧮 Calculator</a>
+  <a href="/logout">🚪 Logout</a>
+</nav>
