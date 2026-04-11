@@ -7,8 +7,6 @@ const QRCode = require('qrcode');
 const pgSession = require('connect-pg-simple')(session);
 const db = require('./database'); // PostgreSQL pool
 const axios = require('axios');
-const recaptcha = require('express-recaptcha');
-recaptcha.init(process.env.RECAPTCHA_SITE_KEY, process.env.RECAPTCHA_SECRET_KEY, {hl: 'en', callback: 'cb'});
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -48,11 +46,11 @@ async function requireAdmin(req, res, next) {
   }
 }
 
-// Custom reCAPTCHA middleware
+// Custom reCAPTCHA v3 verification middleware
 async function verifyRecaptcha(req, res, next) {
   const token = req.body.recaptcha_token;
   if (!token) {
-    return res.render('login', { error: 'Captcha verification failed.' });
+    return res.render('login', { error: 'Captcha verification failed. Please try again.' });
   }
 
   try {
@@ -71,11 +69,12 @@ async function verifyRecaptcha(req, res, next) {
     if (success && score >= 0.5 && action === 'login') {
       return next();
     } else {
-      return res.render('login', { error: 'Suspicious activity detected.' });
+      console.warn(`reCAPTCHA failed: success=${success}, score=${score}`);
+      return res.render('login', { error: 'Suspicious activity detected. Please try again.' });
     }
   } catch (err) {
-    console.error('reCAPTCHA error:', err);
-    return res.render('login', { error: 'Captcha service error.' });
+    console.error('reCAPTCHA verification error:', err);
+    return res.render('login', { error: 'Captcha service error. Please try later.' });
   }
 }
 
@@ -86,46 +85,44 @@ app.get('/login', (req, res) => {
   res.render('login', { error: null });
 });
 
-// The route
 app.post('/login', verifyRecaptcha, async (req, res) => {
-  // ... existing login logic
-});
+  const { email, password } = req.body;
 
-app.post('/login', 
-  verifyRecaptcha(process.env.RECAPTCHA_SECRET_KEY, 0.5), 
-  async (req, res) => {
-    const { email, password } = req.body;
+  try {
+    const result = await db.query('SELECT * FROM users WHERE email = $1', [email]);
+    const user = result.rows[0];
 
-    try {
-      const result = await db.query('SELECT * FROM users WHERE email = $1', [email]);
-      const user = result.rows[0];
-
-      if (!user) {
-        return res.render('login', { error: 'Invalid email or password' });
-      }
-
-      const match = await bcrypt.compare(password, user.password);
-      if (!match) {
-        return res.render('login', { error: 'Invalid email or password' });
-      }
-
-      // 2FA check
-      if (user.twofa_enabled) {
-        req.session.tempUserId = user.id;
-        req.session.tempUserEmail = user.email;
-        return res.redirect('/verify-2fa');
-      }
-
-      req.session.userId = user.id;
-      req.session.userEmail = user.email;
-      res.redirect('/dashboard');
-    } catch (err) {
-      console.error(err);
-      res.render('login', { error: 'Server error' });
+    if (!user) {
+      return res.render('login', { error: 'Invalid email or password' });
     }
+
+    const match = await bcrypt.compare(password, user.password);
+    if (!match) {
+      return res.render('login', { error: 'Invalid email or password' });
+    }
+
+    // Check if 2FA is enabled
+    if (user.twofa_enabled) {
+      req.session.tempUserId = user.id;
+      req.session.tempUserEmail = user.email;
+      return res.redirect('/verify-2fa');
+    }
+
+    // No 2FA, log in directly
+    req.session.userId = user.id;
+    req.session.userEmail = user.email;
+    res.redirect('/dashboard');
+  } catch (err) {
+    console.error(err);
+    res.render('login', { error: 'Server error' });
+  }
 });
 
-// GET: Show 2FA verification page
+app.get('/logout', (req, res) => {
+  req.session.destroy(() => res.redirect('/login'));
+});
+
+// 2FA verification pages
 app.get('/verify-2fa', (req, res) => {
   if (!req.session.tempUserId) {
     return res.redirect('/login');
@@ -133,7 +130,6 @@ app.get('/verify-2fa', (req, res) => {
   res.render('verify-2fa', { error: null });
 });
 
-// POST: Verify 2FA token
 app.post('/verify-2fa', async (req, res) => {
   const { token } = req.body;
   const tempUserId = req.session.tempUserId;
@@ -158,7 +154,6 @@ app.post('/verify-2fa', async (req, res) => {
     });
 
     if (verified) {
-      // Clear temp session and set real session
       req.session.userId = user.id;
       req.session.userEmail = user.email;
       delete req.session.tempUserId;
@@ -171,10 +166,6 @@ app.post('/verify-2fa', async (req, res) => {
     console.error(err);
     res.render('verify-2fa', { error: 'Server error' });
   }
-});
-
-app.get('/logout', (req, res) => {
-  req.session.destroy(() => res.redirect('/login'));
 });
 
 // ---------- Dashboard ----------
