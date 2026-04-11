@@ -373,6 +373,22 @@
             box-sizing: border-box;
             font-family: 'Inter', 'Segoe UI', 'Courier New', monospace;
         }
+
+        .format-toggle-btn {
+        background: #047857;
+        color: white;
+        border: none;
+        border-radius: 40px;
+        padding: 10px 20px;
+        font-weight: 600;
+        cursor: pointer;
+        font-size: 0.9rem;
+        margin-left: auto;
+        }
+
+        .format-toggle-btn:hover {
+        background: #065f46;
+        }
     </style>
 </head>
 <body>
@@ -384,7 +400,8 @@
                 <h1>
                     ⚖️ Pretty Easy 
                     <small>2 DESIMAL</small>
-                    <span class="badge-2d">⬆️ 1234567.89 ⬇️ 1,234,567.89</span>
+                    <span class="badge-2d">⬆️ 1234567.89 ⬇️ <span id="formatExample">1,234,567.89</span></span>
+                    <button class="format-toggle-btn" id="toggleFormatBtn">🇪🇺 Switch to EU (1.234,56)</button>
                 </h1>
 
                 <div class="bulk-section">
@@ -417,7 +434,7 @@
 
                 <!-- TOTAL BAWAH - Format Koma (1,234,567.89) -->
                 <div class="total-section-secondary">
-                    <span class="total-secondary-label">TOTAL AKHIR (KOMA)</span>
+                    <span class="total-secondary-label">TOTAL AKHIR (<span id="formatLabel">KOMA US</span>)</span>
                     <span class="total-secondary-value" id="grandTotalComma">0</span>
                 </div>
 
@@ -467,6 +484,12 @@
             const bulkInput = document.getElementById('bulkInput');
             const previewCount = document.getElementById('previewCount');
             
+            // Format style: 'us' (1,234.56) or 'eu' (1.234,56)
+            let currentFormat = 'us';
+            const formatExample = document.getElementById('formatExample');
+            const formatLabel = document.getElementById('formatLabel');
+            const toggleBtn = document.getElementById('toggleFormatBtn');
+
             // ============================================
             // FUNGSI BULATKAN 2 DESIMAL (INTI)
             // ============================================
@@ -489,15 +512,21 @@
                 let bulat = bulatkan2Desimal(angka);
                 let parts = bulat.toString().split('.');
                 let bilangan = parts[0];
+                let desimal = parts.length > 1 ? parts[1] : '00';
                 
-                let hasDecimal = parts.length > 1 && parts[1] !== '0';
+                // Ensure 2 decimal digits
+                if (desimal.length === 1) desimal = desimal + '0';
+                else if (desimal.length === 0) desimal = '00';
+                else desimal = desimal.substring(0,2);
                 
-                bilangan = bilangan.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-                
-                if (hasDecimal) {
-                    return bilangan + '.' + parts[1].padEnd(2, '0');
+                if (currentFormat === 'us') {
+                    // US: 1,234.56
+                    bilangan = bilangan.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+                    return bilangan + '.' + desimal;
                 } else {
-                    return bilangan;
+                    // EU: 1.234,56
+                    bilangan = bilangan.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+                    return bilangan + ',' + desimal;
                 }
             }
         
@@ -514,12 +543,16 @@
                 // Hapus Rp, spasi, kurung
                 let cleaned = original.replace(/Rp/gi, '').replace(/[()]/g, '').trim();
                 
-                // Ganti titik dengan placeholder
-                cleaned = cleaned.replace(/\./g, '***DOT***');
-                // Hapus koma
-                cleaned = cleaned.replace(/,/g, '');
-                // Kembalikan titik
-                cleaned = cleaned.replace(/\*\*\*DOT\*\*\*/g, '.');
+                if (currentFormat === 'us') {
+                    // US: comma = thousand separator, dot = decimal
+                    // Remove commas, keep dot
+                    cleaned = cleaned.replace(/,/g, '');
+                } else {
+                    // EU: dot = thousand separator, comma = decimal
+                    // Remove dots, replace comma with dot
+                    cleaned = cleaned.replace(/\./g, '');
+                    cleaned = cleaned.replace(/,/g, '.');
+                }
                 
                 let hasil = parseFloat(cleaned) || 0;
                 return isNegative ? -hasil : hasil;
@@ -624,6 +657,32 @@
                 footerAmountSpan.textContent = formatKoma(total);       // Footer pakai koma
             }
             
+            // Refresh all displayed numbers when format changes
+            function refreshAllFormats() {
+                formatExample.textContent = currentFormat === 'us' ? '1,234,567.89' : '1.234.567,89';
+                formatLabel.textContent = currentFormat === 'us' ? 'KOMA US' : 'KOMA EU';
+                toggleBtn.innerHTML = currentFormat === 'us' ? '🇪🇺 Switch to EU (1.234,56)' : '🇺🇸 Switch to US (1,234.56)';
+                
+                // Update each row
+                for (let i = 1; i <= barisCount; i++) {
+                    const hasilArea = document.getElementById(`hasil-${i}`);
+                    const saldoArea = document.getElementById(`saldo-${i}`);
+                    if (hasilArea) {
+                        let nilai = parseAngka(hasilArea.value);
+                        hasilArea.value = formatNumber(nilai);
+                    }
+                    if (saldoArea) {
+                        let nilai = parseAngka(saldoArea.value);
+                        saldoArea.value = formatNumber(nilai);
+                    }
+                }
+                updateTotal();
+            }
+
+            function toggleFormat() {
+                currentFormat = currentFormat === 'us' ? 'eu' : 'us';
+                refreshAllFormats();
+            }
             // ============================================
             // TAMBAH BARIS
             // ============================================
@@ -782,6 +841,7 @@
             });
             
             document.getElementById('fillBulkBtn').addEventListener('click', prosesSemua);
+            toggleBtn.addEventListener('click', toggleFormat);
             document.getElementById('clearBulkBtn').addEventListener('click', function() {
                 bulkInput.value = '';
                 updatePreview();
@@ -801,6 +861,7 @@
             }
             updatePreview();
             
+            refreshAllFormats();
         })();
     </script>
 </body>
