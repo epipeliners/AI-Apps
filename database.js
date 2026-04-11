@@ -26,15 +26,19 @@ async function initDb() {
     `);
 
     // Create session table for connect-pg-simple
+    // Define primary key directly in CREATE TABLE to avoid duplicate PK errors
     await client.query(`
       CREATE TABLE IF NOT EXISTS "session" (
         "sid" varchar NOT NULL COLLATE "default",
         "sess" json NOT NULL,
-        "expire" timestamp(6) NOT NULL
+        "expire" timestamp(6) NOT NULL,
+        PRIMARY KEY ("sid")
       )
-      WITH (OIDS=FALSE);
-      ALTER TABLE "session" ADD CONSTRAINT "session_pkey" PRIMARY KEY ("sid") NOT DEFERRABLE INITIALLY IMMEDIATE;
-      CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON "session" ("expire");
+    `);
+
+    // Create index on expire column (if not exists)
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON "session" ("expire")
     `);
 
     // Create default admin if none exists

@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Verify 2FA · AI Apps</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body style="background: linear-gradient(135deg, #ff7a00 0%, #ffa64d 100%);">
+  <div class="auth-wrapper">
+    <div class="auth-card card">
+      <h2 style="text-align:center;">🔐 Two-Factor Authentication</h2>
+      <p style="text-align:center;">Enter the 6-digit code from your authenticator app.</p>
+      <% if (typeof error !== 'undefined' && error) { %>
+        <div class="alert alert-error"><%= error %></div>
+      <% } %>
+      <form method="POST" action="/verify-2fa">
+        <input type="text" name="token" placeholder="000000" required autofocus pattern="\d{6}" maxlength="6">
+        <button type="submit">Verify</button>
+      </form>
+      <p style="text-align:center; margin-top:1rem;"><a href="/logout">Cancel</a></p>
+    </div>
+  </div>
+</body>
+</html>

@@ -65,6 +65,7 @@ app.post('/login', async (req, res) => {
   const { email, password, captcha } = req.body;
   const storedAnswer = req.session.captchaAnswer;
 
+  // Validate captcha
   if (!captcha || parseInt(captcha) !== storedAnswer) {
     const newCaptcha = generateCaptcha();
     req.session.captchaAnswer = newCaptcha.answer;
@@ -88,6 +89,15 @@ app.post('/login', async (req, res) => {
       return res.render('login', { captchaQuestion: newCaptcha.question, error: 'Invalid email or password' });
     }
 
+    // Check if 2FA is enabled
+    if (user.twofa_enabled) {
+      // Store user ID temporarily for 2FA verification
+      req.session.tempUserId = user.id;
+      req.session.tempUserEmail = user.email;
+      return res.redirect('/verify-2fa');
+    }
+
+    // No 2FA, log in directly
     req.session.userId = user.id;
     req.session.userEmail = user.email;
     res.redirect('/dashboard');
@@ -96,6 +106,54 @@ app.post('/login', async (req, res) => {
     const newCaptcha = generateCaptcha();
     req.session.captchaAnswer = newCaptcha.answer;
     res.render('login', { captchaQuestion: newCaptcha.question, error: 'Server error' });
+  }
+});
+
+// GET: Show 2FA verification page
+app.get('/verify-2fa', (req, res) => {
+  if (!req.session.tempUserId) {
+    return res.redirect('/login');
+  }
+  res.render('verify-2fa', { error: null });
+});
+
+// POST: Verify 2FA token
+app.post('/verify-2fa', async (req, res) => {
+  const { token } = req.body;
+  const tempUserId = req.session.tempUserId;
+
+  if (!tempUserId) {
+    return res.redirect('/login');
+  }
+
+  try {
+    const result = await db.query('SELECT * FROM users WHERE id = $1', [tempUserId]);
+    const user = result.rows[0];
+
+    if (!user || !user.twofa_secret) {
+      return res.redirect('/login');
+    }
+
+    const verified = speakeasy.totp.verify({
+      secret: user.twofa_secret,
+      encoding: 'base32',
+      token: token,
+      window: 1
+    });
+
+    if (verified) {
+      // Clear temp session and set real session
+      req.session.userId = user.id;
+      req.session.userEmail = user.email;
+      delete req.session.tempUserId;
+      delete req.session.tempUserEmail;
+      return res.redirect('/dashboard');
+    } else {
+      res.render('verify-2fa', { error: 'Invalid 2FA code. Try again.' });
+    }
+  } catch (err) {
+    console.error(err);
+    res.render('verify-2fa', { error: 'Server error' });
   }
 });
 
