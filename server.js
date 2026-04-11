@@ -6,7 +6,9 @@ const speakeasy = require('speakeasy');
 const QRCode = require('qrcode');
 const pgSession = require('connect-pg-simple')(session);
 const db = require('./database'); // PostgreSQL pool
-const { verifyGGRecaptchaV3 } = require('express-gg-recaptcha');
+const axios = require('axios');
+const recaptcha = require('express-recaptcha');
+recaptcha.init(process.env.RECAPTCHA_SITE_KEY, process.env.RECAPTCHA_SECRET_KEY, {hl: 'en', callback: 'cb'});
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -46,6 +48,37 @@ async function requireAdmin(req, res, next) {
   }
 }
 
+// Custom reCAPTCHA middleware
+async function verifyRecaptcha(req, res, next) {
+  const token = req.body.recaptcha_token;
+  if (!token) {
+    return res.render('login', { error: 'Captcha verification failed.' });
+  }
+
+  try {
+    const response = await axios.post(
+      'https://www.google.com/recaptcha/api/siteverify',
+      null,
+      {
+        params: {
+          secret: process.env.RECAPTCHA_SECRET_KEY,
+          response: token
+        }
+      }
+    );
+
+    const { success, score, action } = response.data;
+    if (success && score >= 0.5 && action === 'login') {
+      return next();
+    } else {
+      return res.render('login', { error: 'Suspicious activity detected.' });
+    }
+  } catch (err) {
+    console.error('reCAPTCHA error:', err);
+    return res.render('login', { error: 'Captcha service error.' });
+  }
+}
+
 // ---------- Public Routes ----------
 app.get('/', (req, res) => res.redirect('/login'));
 
@@ -53,8 +86,13 @@ app.get('/login', (req, res) => {
   res.render('login', { error: null });
 });
 
+// The route
+app.post('/login', verifyRecaptcha, async (req, res) => {
+  // ... existing login logic
+});
+
 app.post('/login', 
-  verifyGGRecaptchaV3(process.env.RECAPTCHA_SECRET_KEY, 0.5), 
+  verifyRecaptcha(process.env.RECAPTCHA_SECRET_KEY, 0.5), 
   async (req, res) => {
     const { email, password } = req.body;
 
