@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Login · AI Apps</title>
   <link rel="stylesheet" href="/style.css">
+  <!-- Add Google reCAPTCHA v3 script -->
+  <script src="https://www.google.com/recaptcha/api.js?render=<%= process.env.RECAPTCHA_SITE_KEY %>"></script>
 </head>
 <body style="background: linear-gradient(135deg, #ff7a00 0%, #ffa64d 100%);">
   <div class="auth-wrapper">
@@ -13,15 +15,36 @@
       <% if (typeof error !== 'undefined' && error) { %>
         <div class="alert alert-error"><%= error %></div>
       <% } %>
-      <form method="POST" action="/login">
+      <form id="login-form" method="POST" action="/login">
         <input type="email" name="email" placeholder="Email address" required autofocus>
         <input type="password" name="password" placeholder="Password" required>
-        <label style="font-weight:600; margin-bottom:0.25rem; display:block;"><%= captchaQuestion %></label>
-        <input type="text" name="captcha" placeholder="Answer" required>
+        
+        <!-- Old Math Captcha Removed -->
+        
+        <!-- New: Hidden field for reCAPTCHA token -->
+        <input type="hidden" name="recaptcha_token" id="recaptcha_token">
+
         <button type="submit">Sign In</button>
       </form>
       <p style="text-align:center; margin-top:1.5rem;">Contact administrator for account</p>
     </div>
   </div>
+
+  <script>
+    const form = document.getElementById('login-form');
+    form.addEventListener('submit', function(event) {
+      event.preventDefault(); // Stop the form from submitting immediately
+      
+      // Execute reCAPTCHA
+      grecaptcha.ready(function() {
+        grecaptcha.execute('<%= process.env.RECAPTCHA_SITE_KEY %>', {action: 'login'}).then(function(token) {
+          // Set the token in the hidden field
+          document.getElementById('recaptcha_token').value = token;
+          // Now submit the form
+          form.submit();
+        });
+      });
+    });
+  </script>
 </body>
 </html>

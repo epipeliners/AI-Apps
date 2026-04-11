@@ -6,6 +6,7 @@ const speakeasy = require('speakeasy');
 const QRCode = require('qrcode');
 const pgSession = require('connect-pg-simple')(session);
 const db = require('./database'); // PostgreSQL pool
+const { verifyGGRecaptchaV3 } = require('express-gg-recaptcha');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -45,68 +46,45 @@ async function requireAdmin(req, res, next) {
   }
 }
 
-// Helper: generate captcha
-function generateCaptcha() {
-  const num1 = Math.floor(Math.random() * 10) + 1;
-  const num2 = Math.floor(Math.random() * 10) + 1;
-  return { question: `${num1} + ${num2} = ?`, answer: num1 + num2 };
-}
-
 // ---------- Public Routes ----------
 app.get('/', (req, res) => res.redirect('/login'));
 
 app.get('/login', (req, res) => {
-  const captcha = generateCaptcha();
-  req.session.captchaAnswer = captcha.answer;
-  res.render('login', { captchaQuestion: captcha.question, error: null });
+  res.render('login', { error: null });
 });
 
-app.post('/login', async (req, res) => {
-  const { email, password, captcha } = req.body;
-  const storedAnswer = req.session.captchaAnswer;
+app.post('/login', 
+  verifyGGRecaptchaV3(process.env.RECAPTCHA_SECRET_KEY, 0.5), 
+  async (req, res) => {
+    const { email, password } = req.body;
 
-  // Validate captcha
-  if (!captcha || parseInt(captcha) !== storedAnswer) {
-    const newCaptcha = generateCaptcha();
-    req.session.captchaAnswer = newCaptcha.answer;
-    return res.render('login', { captchaQuestion: newCaptcha.question, error: 'Invalid captcha' });
-  }
+    try {
+      const result = await db.query('SELECT * FROM users WHERE email = $1', [email]);
+      const user = result.rows[0];
 
-  try {
-    const result = await db.query('SELECT * FROM users WHERE email = $1', [email]);
-    const user = result.rows[0];
+      if (!user) {
+        return res.render('login', { error: 'Invalid email or password' });
+      }
 
-    if (!user) {
-      const newCaptcha = generateCaptcha();
-      req.session.captchaAnswer = newCaptcha.answer;
-      return res.render('login', { captchaQuestion: newCaptcha.question, error: 'Invalid email or password' });
+      const match = await bcrypt.compare(password, user.password);
+      if (!match) {
+        return res.render('login', { error: 'Invalid email or password' });
+      }
+
+      // 2FA check
+      if (user.twofa_enabled) {
+        req.session.tempUserId = user.id;
+        req.session.tempUserEmail = user.email;
+        return res.redirect('/verify-2fa');
+      }
+
+      req.session.userId = user.id;
+      req.session.userEmail = user.email;
+      res.redirect('/dashboard');
+    } catch (err) {
+      console.error(err);
+      res.render('login', { error: 'Server error' });
     }
-
-    const match = await bcrypt.compare(password, user.password);
-    if (!match) {
-      const newCaptcha = generateCaptcha();
-      req.session.captchaAnswer = newCaptcha.answer;
-      return res.render('login', { captchaQuestion: newCaptcha.question, error: 'Invalid email or password' });
-    }
-
-    // Check if 2FA is enabled
-    if (user.twofa_enabled) {
-      // Store user ID temporarily for 2FA verification
-      req.session.tempUserId = user.id;
-      req.session.tempUserEmail = user.email;
-      return res.redirect('/verify-2fa');
-    }
-
-    // No 2FA, log in directly
-    req.session.userId = user.id;
-    req.session.userEmail = user.email;
-    res.redirect('/dashboard');
-  } catch (err) {
-    console.error(err);
-    const newCaptcha = generateCaptcha();
-    req.session.captchaAnswer = newCaptcha.answer;
-    res.render('login', { captchaQuestion: newCaptcha.question, error: 'Server error' });
-  }
 });
 
 // GET: Show 2FA verification page
