@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Edit Subscription</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <%- include('../partials/header', { role }) %>
+
+  <main>
+    <div class="container">
+      <div class="card" style="max-width:600px; margin:0 auto;">
+        <h2>✏️ Edit Phone Entry</h2>
+        <% if (typeof error !== 'undefined' && error) { %><div class="alert alert-error"><%= error %></div><% } %>
+        <form method="POST">
+          <label>Name (readonly)</label>
+          <input type="text" value="<%= sub.name %>" readonly disabled>
+          <label>Phone *</label>
+          <input type="text" name="phone" value="<%= sub.phone %>" required>
+          <label>Expired (YYYY-MM-DD) *</label>
+          <input type="date" name="expired" value="<%= sub.expired %>" required>
+          <label>Notes</label>
+          <textarea name="notes"><%= sub.notes || '' %></textarea>
+          <button type="submit">Save Changes</button>
+          <a href="/phone-tracker"><button type="button" class="secondary">Cancel</button></a>
+        </form>
+      </div>
+    </div>
+  </main>
+
+  <%- include('../partials/footer') %>
+</body>
+</html>

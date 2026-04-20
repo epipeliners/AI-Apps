@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Add Phone Entry · AI Apps</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <%- include('../partials/header', { role }) %>
+
+  <main>
+    <div class="container">
+      <div class="card" style="max-width:600px; margin:0 auto;">
+        <h2>➕ Add New Phone Entry</h2>
+        <% if (typeof error !== 'undefined' && error) { %>
+          <div class="alert alert-error"><%= error %></div>
+        <% } %>
+        <form method="POST">
+          <label>No / Order</label>
+          <input type="text" name="display_order" placeholder="Optional">
+          <label>Name *</label>
+          <input type="text" name="name" required>
+          <label>Bank</label>
+          <input type="text" name="bank">
+          <label>Code</label>
+          <input type="text" name="code">
+          <label>Phone *</label>
+          <input type="text" name="phone" required>
+          <label>Expired Date *</label>
+          <input type="date" name="expired" required>
+          <label>Notes</label>
+          <textarea name="notes"></textarea>
+          <label>Web</label>
+          <% if (userWeb) { %>
+            <input type="text" value="<%= userWeb %>" readonly disabled>
+            <input type="hidden" name="web" value="<%= userWeb %>">
+          <% } else { %>
+            <input type="text" name="web">
+          <% } %>
+          <label>Credit</label>
+          <input type="text" name="credit">
+          <button type="submit">Save Entry</button>
+          <a href="/phone-tracker"><button type="button" class="secondary">Cancel</button></a>
+        </form>
+      </div>
+    </div>
+  </main>
+
+  <%- include('../partials/footer') %>
+</body>
+</html>

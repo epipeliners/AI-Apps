@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bulk Import · Phone Tracker</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <%- include('../partials/header', { role }) %>
+
+  <main>
+    <div class="container">
+      <div class="card">
+        <h2>📋 Bulk Import Phone Numbers</h2>
+        <p>Paste data in this order (tab or comma separated):<br>
+        <code>No, Name, Bank, Code, Phone, Expired (YYYY-MM-DD), Notes, Web, Credit</code></p>
+
+        <% if (typeof success !== 'undefined' && success) { %><div class="alert alert-success"><%- success %></div><% } %>
+        <% if (typeof error !== 'undefined' && error) { %><div class="alert alert-error"><%- error %></div><% } %>
+
+        <form method="POST">
+          <textarea name="data" rows="15" placeholder="1&#9;John Doe&#9;BCA&#9;123&#9;08123456789&#9;2026-12-31&#9;Some note&#9;WebA&#9;100&#10;2&#9;Jane&#9;Mandiri&#9;456&#9;08987654321&#9;2026-06-15&#9;&#9;WebB&#9;50" required></textarea>
+          <button type="submit" style="margin-top:20px;">🚀 Import Data</button>
+          <a href="/phone-tracker"><button type="button" class="secondary">Cancel</button></a>
+        </form>
+      </div>
+    </div>
+  </main>
+
+  <%- include('../partials/footer') %>
+</body>
+</html>

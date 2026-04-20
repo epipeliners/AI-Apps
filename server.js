@@ -78,6 +78,26 @@ async function verifyRecaptcha(req, res, next) {
   }
 }
 
+// ---------- Phone Tracker Module ----------
+async function requirePhoneAccess(req, res, next) {
+  if (!req.session.userId) return res.redirect('/login');
+  try {
+    const result = await db.query('SELECT role, web_access FROM users WHERE id = $1', [req.session.userId]);
+    const user = result.rows[0];
+    if (user.role === 'admin') {
+      req.userWebAccess = null; // admin sees all
+      return next();
+    }
+    if (!user.web_access) {
+      return res.status(403).send('Access denied – no web assigned');
+    }
+    req.userWebAccess = user.web_access;
+    next();
+  } catch (err) {
+    return res.status(500).send('Server error');
+  }
+}
+
 // ---------- Public Routes ----------
 app.get('/', (req, res) => res.redirect('/login'));
 
@@ -199,6 +219,283 @@ app.get('/profile', requireLogin, async (req, res) => {
   }
 });
 
+app.get('/phone-tracker', requireLogin, requirePhoneAccess, async (req, res) => {
+  try {
+    const userWeb = req.userWebAccess;
+    let query = 'SELECT * FROM phone_subscriptions';
+    let params = [];
+    let whereClause = '';
+    
+    if (userWeb) {
+      whereClause = ' WHERE web = $1';
+      params.push(userWeb);
+    }
+    
+    // Check if reminder filter is active
+    const showReminder = req.query.reminder === 'true';
+    if (showReminder) {
+      const sixtyDaysFromNow = new Date();
+      sixtyDaysFromNow.setDate(sixtyDaysFromNow.getDate() + 60);
+      const today = new Date().toISOString().split('T')[0];
+      const future = sixtyDaysFromNow.toISOString().split('T')[0];
+      
+      whereClause = whereClause 
+        ? `${whereClause} AND expired BETWEEN $${params.length+1} AND $${params.length+2}`
+        : ` WHERE expired BETWEEN $1 AND $2`;
+      if (!userWeb) {
+        params = [today, future];
+      } else {
+        params.push(today, future);
+      }
+    }
+    
+    query += whereClause + ' ORDER BY display_order, id';
+    const result = await db.query(query, params);
+    
+    const userRole = (await db.query('SELECT role FROM users WHERE id=$1', [req.session.userId])).rows[0].role;
+    res.render('phone-tracker/index', {
+      subscriptions: result.rows,
+      showReminder,
+      error: null,
+      success: null,
+      role: userRole,
+      canEdit: true, // all logged-in users with access can edit their web's entries
+      userWeb
+    });
+  } catch (err) {
+    console.error(err);
+    res.render('phone-tracker/index', { subscriptions: [], error: 'Failed to load data', success: null });
+  }
+});
+
+app.get('/phone-tracker/bulk', requireLogin, requirePhoneAccess, async (req, res) => {
+  const userRole = (await db.query('SELECT role FROM users WHERE id=$1', [req.session.userId])).rows[0].role;
+  res.render('phone-tracker/bulk', { error: null, role: userRole });
+});
+
+app.post('/phone-tracker/bulk', requireLogin, requirePhoneAccess, async (req, res) => {
+  const { data } = req.body;
+  const userWeb = req.userWebAccess;
+  const userId = req.session.userId;
+
+  const lines = data.split('\n').filter(line => line.trim() !== '');
+  const errors = [];
+  const success = [];
+
+  // Month mapping for Indonesian abbreviations
+  const monthMap = {
+    'jan': '01', 'feb': '02', 'mar': '03', 'apr': '04',
+    'mei': '05', 'jun': '06', 'jul': '07', 'agt': '08',
+    'sep': '09', 'okt': '10', 'nov': '11', 'des': '12'
+  };
+
+  function parseIndonesianDate(dateStr) {
+    let match = dateStr.match(/(\d{1,2})[-\s\/]+([A-Za-z]{3})[-\s\/]+(\d{4})/i);
+    if (!match) return null;
+    let day = match[1].padStart(2, '0');
+    let monthAbbr = match[2].toLowerCase();
+    let year = match[3];
+    let month = monthMap[monthAbbr];
+    if (!month) return null;
+    return `${year}-${month}-${day}`;
+  }
+
+  for (let line of lines) {
+    // Trim the line
+    line = line.trim();
+    
+    // Try to detect delimiter: tab first
+    let parts = [];
+    if (line.includes('\t')) {
+      parts = line.split('\t');
+    } else {
+      // Split by 2+ spaces
+      parts = line.split(/\s{2,}/);
+      // If that yields only 1 part, maybe it's space-separated with single spaces
+      if (parts.length < 5) {
+        // Try splitting by single space but only if it gives enough columns
+        const singleSpaceParts = line.split(/\s+/);
+        if (singleSpaceParts.length >= 5) {
+          parts = singleSpaceParts;
+        }
+      }
+    }
+
+    // If still not enough parts, fill with empty strings
+    while (parts.length < 9) parts.push('');
+
+    let display_order = parts[0]?.trim() || '';
+    let name = parts[1]?.trim() || '';
+    let bank = parts[2]?.trim() || '';
+    let code = parts[3]?.trim() || '';
+    let phone = parts[4]?.trim() || '';
+    let expiredRaw = parts[5]?.trim() || '';
+    
+    // The rest: notes, web, credit may be merged or spread across remaining parts
+    let remaining = parts.slice(6).join(' ').trim();
+    let notes = '';
+    let web = '';
+    let credit = '';
+
+    // Try to extract web and credit from remaining
+    // Common pattern: "ACTIVE PANEN 68,590" -> notes="ACTIVE", web="PANEN", credit="68,590"
+    // Or just numbers at the end might be credit
+    const creditMatch = remaining.match(/([\d.,]+)$/);
+    if (creditMatch) {
+      credit = creditMatch[1];
+      remaining = remaining.slice(0, creditMatch.index).trim();
+    }
+    
+    // If userWeb is set (non-admin), force web to userWeb
+    if (userWeb) {
+      web = userWeb;
+      // The rest becomes notes
+      notes = remaining;
+    } else {
+      // Otherwise, try to split remaining into notes and web
+      const words = remaining.split(/\s+/);
+      if (words.length >= 2) {
+        // Assume last word is web, rest is notes
+        web = words.pop();
+        notes = words.join(' ');
+      } else {
+        notes = remaining;
+      }
+    }
+
+    // Basic validation
+    if (!name || !phone || !expiredRaw) {
+      errors.push(`Missing required fields (name/phone/expired): ${line.substring(0, 60)}...`);
+      continue;
+    }
+
+    // Convert date
+    let expired;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(expiredRaw)) {
+      expired = expiredRaw;
+    } else {
+      expired = parseIndonesianDate(expiredRaw);
+      if (!expired) {
+        errors.push(`Invalid date format: "${expiredRaw}" – expected DD-MMM-YYYY`);
+        continue;
+      }
+    }
+
+    try {
+      await db.query(
+        `INSERT INTO phone_subscriptions 
+         (display_order, name, bank, code, phone, expired, notes, web, credit, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [display_order, name, bank, code, phone, expired, notes, web, credit, userId]
+      );
+      success.push(`Added: ${name}`);
+    } catch (err) {
+      errors.push(`DB error for ${name}: ${err.message}`);
+    }
+  }
+
+  const userRole = (await db.query('SELECT role FROM users WHERE id=$1', [req.session.userId])).rows[0].role;
+  res.render('phone-tracker/bulk', {
+    error: errors.length ? errors.join('<br>') : null,
+    success: success.length ? `Successfully added ${success.length} records.` : null,
+    role: userRole
+  });
+});
+
+// Single entry form
+app.get('/phone-tracker/create', requireLogin, requirePhoneAccess, async (req, res) => {
+  const userRole = (await db.query('SELECT role FROM users WHERE id=$1', [req.session.userId])).rows[0].role;
+  res.render('phone-tracker/create', { error: null, role: userRole, userWeb: req.userWebAccess });
+});
+
+app.post('/phone-tracker/create', requireLogin, requirePhoneAccess, async (req, res) => {
+  const { display_order, name, bank, code, phone, expired, notes, web, credit } = req.body;
+  const userWeb = req.userWebAccess;
+  const userId = req.session.userId;
+
+  // Convert date if needed (though the form uses type="date", but just in case)
+  let finalExpired = expired;
+  // If it came as DD-MMM-YYYY, convert (but the form should give YYYY-MM-DD)
+  if (expired && !/^\d{4}-\d{2}-\d{2}$/.test(expired)) {
+    finalExpired = parseIndonesianDate(expired);
+    if (!finalExpired) {
+      const userRole = (await db.query('SELECT role FROM users WHERE id=$1', [userId])).rows[0].role;
+      return res.render('phone-tracker/create', { error: 'Invalid date format', role: userRole, userWeb });
+    }
+  }
+
+  let finalWeb = web;
+  if (userWeb) {
+    finalWeb = userWeb;
+  }
+
+  try {
+    await db.query(
+      `INSERT INTO phone_subscriptions (display_order, name, bank, code, phone, expired, notes, web, credit, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [display_order, name, bank, code, phone, finalExpired, notes, finalWeb, credit, userId]
+    );
+    res.redirect('/phone-tracker?success=Entry added');
+  } catch (err) {
+    const userRole = (await db.query('SELECT role FROM users WHERE id=$1', [userId])).rows[0].role;
+    res.render('phone-tracker/create', { error: 'Failed to add entry: ' + err.message, role: userRole, userWeb });
+  }
+});
+
+app.get('/phone-tracker/:id/edit', requireLogin, requirePhoneAccess, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const userWeb = req.userWebAccess;
+    
+    let query = 'SELECT * FROM phone_subscriptions WHERE id = $1';
+    let params = [id];
+    if (userWeb) {
+      query += ' AND web = $2';
+      params.push(userWeb);
+    }
+    
+    const result = await db.query(query, params);
+    if (result.rows.length === 0) {
+      return res.status(403).send('Not found or access denied');
+    }
+    
+    const userRole = (await db.query('SELECT role FROM users WHERE id=$1', [req.session.userId])).rows[0].role;
+    res.render('phone-tracker/edit', { sub: result.rows[0], error: null, role: userRole });
+  } catch (err) {
+    res.redirect('/phone-tracker');
+  }
+});
+
+app.post('/phone-tracker/:id/edit', requireLogin, requirePhoneAccess, async (req, res) => {
+  const id = req.params.id;
+  const { phone, expired, notes } = req.body;
+  const userWeb = req.userWebAccess;
+  
+  try {
+    // Verify ownership
+    let checkQuery = 'SELECT * FROM phone_subscriptions WHERE id = $1';
+    let checkParams = [id];
+    if (userWeb) {
+      checkQuery += ' AND web = $2';
+      checkParams.push(userWeb);
+    }
+    const check = await db.query(checkQuery, checkParams);
+    if (check.rows.length === 0) {
+      return res.status(403).send('Access denied');
+    }
+    
+    await db.query(
+      `UPDATE phone_subscriptions SET phone=$1, expired=$2, notes=$3, updated_at=NOW() WHERE id=$4`,
+      [phone, expired, notes, id]
+    );
+    res.redirect('/phone-tracker?success=Entry updated');
+  } catch (err) {
+    const sub = (await db.query('SELECT * FROM phone_subscriptions WHERE id=$1', [id])).rows[0];
+    const userRole = (await db.query('SELECT role FROM users WHERE id=$1', [req.session.userId])).rows[0].role;
+    res.render('phone-tracker/edit', { sub, error: 'Update failed', role: userRole });
+  }
+});
+
 app.post('/profile/enable-2fa', requireLogin, async (req, res) => {
   const secret = speakeasy.generateSecret({
     length: 20,
@@ -260,6 +557,26 @@ app.post('/profile/verify-2fa', requireLogin, async (req, res) => {
     res.redirect('/profile');
   }
 });
+
+app.post('/phone-tracker/:id/delete', requireLogin, requireAdmin, async (req, res) => {
+  await db.query('DELETE FROM phone_subscriptions WHERE id=$1', [req.params.id]);
+  res.redirect('/phone-tracker?success=Entry deleted');
+});
+
+// Date formatting helper for DD-MMM-YYYY
+function formatDateDDMMMYYYY(dateString) {
+  if (!dateString) return '';
+  const date = new Date(dateString);
+  if (isNaN(date)) return dateString;
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = months[date.getMonth()];
+  const year = date.getFullYear();
+  return `${day}-${month}-${year}`;
+}
+
+// Make it available to all views
+app.locals.formatDate = formatDateDDMMMYYYY;
 
 // ---------- Admin Routes ----------
 app.get('/admin/users', requireAdmin, async (req, res) => {
@@ -369,6 +686,47 @@ app.get('/tools/calculator', requireLogin, async (req, res) => {
     res.render('calculator', { role: result.rows[0].role });
   } catch (err) {
     res.redirect('/login');
+  }
+});
+
+// Format Converter Tool
+app.get('/tools/converter', requireLogin, async (req, res) => {
+  try {
+    const result = await db.query('SELECT role FROM users WHERE id = $1', [req.session.userId]);
+    res.render('converter', { role: result.rows[0].role });
+  } catch (err) {
+    res.redirect('/login');
+  }
+});
+
+// Single entry form
+app.get('/phone-tracker/create', requireLogin, requirePhoneAccess, async (req, res) => {
+  const userRole = (await db.query('SELECT role FROM users WHERE id=$1', [req.session.userId])).rows[0].role;
+  res.render('phone-tracker/create', { error: null, role: userRole, userWeb: req.userWebAccess });
+});
+
+app.post('/phone-tracker/create', requireLogin, requirePhoneAccess, async (req, res) => {
+  const { display_order, name, bank, code, phone, expired, notes, credit } = req.body;
+  let web = req.body.web;
+  const userWeb = req.userWebAccess;
+  const userId = req.session.userId;
+
+  // Force web if user is restricted
+  if (userWeb) {
+    web = userWeb;
+  }
+
+  try {
+    await db.query(
+      `INSERT INTO phone_subscriptions 
+       (display_order, name, bank, code, phone, expired, notes, web, credit, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [display_order || null, name, bank, code, phone, expired, notes, web, credit, userId]
+    );
+    res.redirect('/phone-tracker?success=Entry created');
+  } catch (err) {
+    const userRole = (await db.query('SELECT role FROM users WHERE id=$1', [req.session.userId])).rows[0].role;
+    res.render('phone-tracker/create', { error: 'Failed to create: ' + err.message, role: userRole, userWeb });
   }
 });
 
