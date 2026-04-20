@@ -282,80 +282,80 @@ app.post('/phone-tracker/bulk', requireLogin, requirePhoneAccess, async (req, re
   const errors = [];
   const success = [];
 
-  // Month mapping for Indonesian abbreviations
+  // Month mapping (extended)
   const monthMap = {
-    'jan': '01', 'feb': '02', 'mar': '03', 'apr': '04',
-    'mei': '05', 'jun': '06', 'jul': '07', 'agt': '08',
-    'sep': '09', 'okt': '10', 'nov': '11', 'des': '12'
+    'jan': '01', 'januari': '01',
+    'feb': '02', 'februari': '02',
+    'mar': '03', 'maret': '03',
+    'apr': '04', 'april': '04',
+    'mei': '05', 'may': '05',
+    'jun': '06', 'juni': '06',
+    'jul': '07', 'juli': '07',
+    'agt': '08', 'agustus': '08', 'aug': '08',
+    'sep': '09', 'september': '09',
+    'okt': '10', 'oktober': '10', 'oct': '10',
+    'nov': '11', 'november': '11',
+    'des': '12', 'desember': '12', 'dec': '12'
   };
 
   function parseIndonesianDate(dateStr) {
-    let match = dateStr.match(/(\d{1,2})[-\s\/]+([A-Za-z]{3})[-\s\/]+(\d{4})/i);
+    let cleaned = dateStr.trim().replace(/[\s\/]+/g, '-');
+    const match = cleaned.match(/^(\d{1,2})-([A-Za-z]{3,})-(\d{4})$/i);
     if (!match) return null;
-    let day = match[1].padStart(2, '0');
-    let monthAbbr = match[2].toLowerCase();
-    let year = match[3];
-    let month = monthMap[monthAbbr];
+    const day = match[1].padStart(2, '0');
+    const monthAbbr = match[2].toLowerCase();
+    const year = match[3];
+    const month = monthMap[monthAbbr];
     if (!month) return null;
     return `${year}-${month}-${day}`;
   }
 
-  for (let line of lines) {
-    // Trim the line
-    line = line.trim();
+  for (const line of lines) {
+    const trimmedLine = line.trim();
     
-    // Try to detect delimiter: tab first
+    // Determine delimiter
     let parts = [];
-    if (line.includes('\t')) {
-      parts = line.split('\t');
+    if (trimmedLine.includes('\t')) {
+      parts = trimmedLine.split('\t');
     } else {
-      // Split by 2+ spaces
-      parts = line.split(/\s{2,}/);
-      // If that yields only 1 part, maybe it's space-separated with single spaces
+      parts = trimmedLine.split(/\s{2,}/);
       if (parts.length < 5) {
-        // Try splitting by single space but only if it gives enough columns
-        const singleSpaceParts = line.split(/\s+/);
+        const singleSpaceParts = trimmedLine.split(/\s+/);
         if (singleSpaceParts.length >= 5) {
           parts = singleSpaceParts;
         }
       }
     }
 
-    // If still not enough parts, fill with empty strings
+    // Pad parts to at least 9 elements
     while (parts.length < 9) parts.push('');
 
-    let display_order = parts[0]?.trim() || '';
-    let name = parts[1]?.trim() || '';
-    let bank = parts[2]?.trim() || '';
-    let code = parts[3]?.trim() || '';
-    let phone = parts[4]?.trim() || '';
-    let expiredRaw = parts[5]?.trim() || '';
+    const display_order = parts[0]?.trim() || '';
+    const name = parts[1]?.trim() || '';
+    const bank = parts[2]?.trim() || '';
+    const code = parts[3]?.trim() || '';
+    const phone = parts[4]?.trim() || '';
+    const expiredRaw = parts[5]?.trim() || '';
     
-    // The rest: notes, web, credit may be merged or spread across remaining parts
+    // Handle remaining fields (notes, web, credit)
     let remaining = parts.slice(6).join(' ').trim();
     let notes = '';
     let web = '';
     let credit = '';
 
-    // Try to extract web and credit from remaining
-    // Common pattern: "ACTIVE PANEN 68,590" -> notes="ACTIVE", web="PANEN", credit="68,590"
-    // Or just numbers at the end might be credit
+    // Extract credit (numeric at end)
     const creditMatch = remaining.match(/([\d.,]+)$/);
     if (creditMatch) {
       credit = creditMatch[1];
       remaining = remaining.slice(0, creditMatch.index).trim();
     }
-    
-    // If userWeb is set (non-admin), force web to userWeb
+
     if (userWeb) {
       web = userWeb;
-      // The rest becomes notes
       notes = remaining;
     } else {
-      // Otherwise, try to split remaining into notes and web
       const words = remaining.split(/\s+/);
       if (words.length >= 2) {
-        // Assume last word is web, rest is notes
         web = words.pop();
         notes = words.join(' ');
       } else {
@@ -363,13 +363,28 @@ app.post('/phone-tracker/bulk', requireLogin, requirePhoneAccess, async (req, re
       }
     }
 
-    // Basic validation
+    // Validation
     if (!name || !phone || !expiredRaw) {
-      errors.push(`Missing required fields (name/phone/expired): ${line.substring(0, 60)}...`);
+      errors.push(`Missing required fields: ${trimmedLine.substring(0, 60)}...`);
       continue;
     }
 
-    // Convert date
+    // Duplicate check
+    try {
+      const existing = await db.query(
+        'SELECT id FROM phone_subscriptions WHERE phone = $1',
+        [phone]
+      );
+      if (existing.rows.length > 0) {
+        errors.push(`Skipped duplicate phone: ${phone} (${name})`);
+        continue;
+      }
+    } catch (err) {
+      errors.push(`DB error checking duplicate for ${phone}: ${err.message}`);
+      continue;
+    }
+
+    // Parse date
     let expired;
     if (/^\d{4}-\d{2}-\d{2}$/.test(expiredRaw)) {
       expired = expiredRaw;
@@ -381,6 +396,7 @@ app.post('/phone-tracker/bulk', requireLogin, requirePhoneAccess, async (req, re
       }
     }
 
+    // Insert
     try {
       await db.query(
         `INSERT INTO phone_subscriptions 
@@ -390,7 +406,7 @@ app.post('/phone-tracker/bulk', requireLogin, requirePhoneAccess, async (req, re
       );
       success.push(`Added: ${name}`);
     } catch (err) {
-      errors.push(`DB error for ${name}: ${err.message}`);
+      errors.push(`DB insert error for ${name}: ${err.message}`);
     }
   }
 
