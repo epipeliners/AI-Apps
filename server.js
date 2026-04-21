@@ -7,6 +7,7 @@ const QRCode = require('qrcode');
 const pgSession = require('connect-pg-simple')(session);
 const db = require('./database'); // PostgreSQL pool
 const axios = require('axios');
+const { ipWhitelistMiddleware, logAccess } = require('./ipWhitelist');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -32,12 +33,33 @@ function requireLogin(req, res, next) {
   next();
 }
 
+function hasModuleAccess(role, module) {
+  const fullAccess = ['admin', 'boss'];
+  const hrFull = ['leader'];
+  const hrOwn = ['cs', 'joker'];
+  const toolsOnly = ['user'];
+  
+  if (fullAccess.includes(role)) return true;
+  
+  if (module === 'hr') {
+    return hrFull.includes(role) || hrOwn.includes(role);
+  }
+  if (module === 'hr_full') {
+    return hrFull.includes(role) || fullAccess.includes(role);
+  }
+  if (module === 'calculator' || module === 'converter') {
+    return true; // all logged-in users
+  }
+  return false;
+}
+
 // Helper: require admin
 async function requireAdmin(req, res, next) {
   if (!req.session.userId) return res.redirect('/login');
   try {
     const result = await db.query('SELECT role FROM users WHERE id = $1', [req.session.userId]);
-    if (result.rows.length === 0 || result.rows[0].role !== 'admin') {
+    const role = result.rows[0].role;
+    if (role !== 'admin' && role !== 'boss') {
       return res.status(403).send('Access denied');
     }
     next();
@@ -78,6 +100,44 @@ async function verifyRecaptcha(req, res, next) {
   }
 }
 
+async function renumberDisplayOrders(userWeb, userRole) {
+  try {
+    let query;
+    let params = [];
+    if (userRole === 'admin' || userRole === 'boss') {
+      // Renumber per web
+      const webs = await db.query('SELECT DISTINCT web FROM phone_subscriptions');
+      for (const row of webs.rows) {
+        const web = row.web;
+        await db.query(`
+          UPDATE phone_subscriptions
+          SET display_order = new_order
+          FROM (
+            SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS new_order
+            FROM phone_subscriptions
+            WHERE web = $1
+          ) AS ranked
+          WHERE phone_subscriptions.id = ranked.id AND phone_subscriptions.web = $1
+        `, [web]);
+      }
+    } else {
+      // Renumber only the user's web
+      await db.query(`
+        UPDATE phone_subscriptions
+        SET display_order = new_order
+        FROM (
+          SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS new_order
+          FROM phone_subscriptions
+          WHERE web = $1
+        ) AS ranked
+        WHERE phone_subscriptions.id = ranked.id AND phone_subscriptions.web = $1
+      `, [userWeb]);
+    }
+  } catch (err) {
+    console.error('Renumbering error:', err);
+  }
+}
+
 // ---------- Phone Tracker Module ----------
 async function requirePhoneAccess(req, res, next) {
   if (!req.session.userId) return res.redirect('/login');
@@ -92,6 +152,24 @@ async function requirePhoneAccess(req, res, next) {
       return res.status(403).send('Access denied – no web assigned');
     }
     req.userWebAccess = user.web_access;
+    next();
+  } catch (err) {
+    return res.status(500).send('Server error');
+  }
+}
+
+// HR access middleware (leader, cs, joker, admin, boss)
+async function requireHRAccess(req, res, next) {
+  if (!req.session.userId) return res.redirect('/login');
+  try {
+    const result = await db.query('SELECT role, web_access FROM users WHERE id = $1', [req.session.userId]);
+    const user = result.rows[0];
+    const allowedRoles = ['admin', 'boss', 'leader', 'cs', 'joker'];
+    if (!allowedRoles.includes(user.role)) {
+      return res.status(403).send('Access denied');
+    }
+    req.userRole = user.role;
+    req.userWeb = user.web_access;
     next();
   } catch (err) {
     return res.status(500).send('Server error');
@@ -228,6 +306,8 @@ app.get('/phone-tracker', requireLogin, requirePhoneAccess, async (req, res) => 
     
     if (userWeb) {
       whereClause = ' WHERE web = $1';
+      query += ' ORDER BY display_order, id';
+      const result = await db.query(query, params);
       params.push(userWeb);
     }
     
@@ -501,9 +581,10 @@ app.post('/phone-tracker/:id/edit', requireLogin, requirePhoneAccess, async (req
     }
     
     await db.query(
-      `UPDATE phone_subscriptions SET phone=$1, expired=$2, notes=$3, updated_at=NOW() WHERE id=$4`,
-      [phone, expired, notes, id]
+      `UPDATE phone_subscriptions SET phone=$1, expired=$2, notes=$3, credit=$4, updated_at=NOW() WHERE id=$5`,
+      [phone, expired, notes, credit, id]
     );
+    
     res.redirect('/phone-tracker?success=Entry updated');
   } catch (err) {
     const sub = (await db.query('SELECT * FROM phone_subscriptions WHERE id=$1', [id])).rows[0];
@@ -658,6 +739,35 @@ app.get('/admin/users/:id/edit', requireAdmin, async (req, res) => {
   }
 });
 
+// IP Whitelist Management
+app.get('/admin/whitelist', requireAdmin, (req, res) => {
+  const { getWhitelist, getAccessLogs } = require('./ipWhitelist');
+  res.render('admin/whitelist', {
+    whitelist: getWhitelist(),
+    logs: getAccessLogs().slice(0, 100), // show last 100
+    error: null,
+    success: null,
+    role: 'admin' // or pass actual role
+  });
+});
+
+app.post('/admin/whitelist/add', requireAdmin, (req, res) => {
+  const { ip } = req.body;
+  const { addToWhitelist } = require('./ipWhitelist');
+  if (addToWhitelist(ip)) {
+    res.redirect('/admin/whitelist?success=IP added');
+  } else {
+    res.redirect('/admin/whitelist?error=IP already exists');
+  }
+});
+
+app.post('/admin/whitelist/remove', requireAdmin, (req, res) => {
+  const { ip } = req.body;
+  const { removeFromWhitelist } = require('./ipWhitelist');
+  removeFromWhitelist(ip);
+  res.redirect('/admin/whitelist?success=IP removed');
+});
+
 app.post('/admin/users/:id/edit', requireAdmin, async (req, res) => {
   const { email, password, role } = req.body;
   const userId = req.params.id;
@@ -744,6 +854,200 @@ app.post('/phone-tracker/create', requireLogin, requirePhoneAccess, async (req, 
     const userRole = (await db.query('SELECT role FROM users WHERE id=$1', [req.session.userId])).rows[0].role;
     res.render('phone-tracker/create', { error: 'Failed to create: ' + err.message, role: userRole, userWeb });
   }
+});
+
+app.post('/phone-tracker/bulk-delete', requireLogin, requirePhoneAccess, async (req, res) => {
+  const { ids } = req.body;
+  if (!ids) return res.redirect('/phone-tracker');
+
+  const idArray = Array.isArray(ids) ? ids : [ids];
+  const userWeb = req.userWebAccess;
+  const userId = req.session.userId;
+  const userRole = (await db.query('SELECT role FROM users WHERE id=$1', [userId])).rows[0].role;
+
+  try {
+    // Build query with web restriction for non-admin/boss
+    let query = 'DELETE FROM phone_subscriptions WHERE id = ANY($1)';
+    let params = [idArray];
+    if (userRole !== 'admin' && userRole !== 'boss') {
+      query += ' AND web = $2';
+      params.push(userWeb);
+    }
+    await db.query(query, params);
+    
+    // Renumber display_order for the affected webs
+    await renumberDisplayOrders(userWeb, userRole);
+    
+    res.redirect('/phone-tracker?success=Selected entries deleted');
+  } catch (err) {
+    console.error(err);
+    res.redirect('/phone-tracker?error=Delete failed');
+  }
+});
+
+app.post('/phone-tracker/:id/delete', requireLogin, requirePhoneAccess, async (req, res) => {
+  const id = req.params.id;
+  const userWeb = req.userWebAccess;
+  const userRole = (await db.query('SELECT role FROM users WHERE id=$1', [req.session.userId])).rows[0].role;
+
+  try {
+    let query = 'DELETE FROM phone_subscriptions WHERE id = $1';
+    let params = [id];
+    if (userRole !== 'admin' && userRole !== 'boss') {
+      query += ' AND web = $2';
+      params.push(userWeb);
+    }
+    await db.query(query, params);
+    await renumberDisplayOrders(userWeb, userRole);
+    res.redirect('/phone-tracker?success=Entry deleted');
+  } catch (err) {
+    res.redirect('/phone-tracker?error=Delete failed');
+  }
+});
+
+// ---------- HR Module ----------
+
+// List employees (with visibility rules)
+app.get('/hr/employees', requireLogin, requireHRAccess, async (req, res) => {
+  try {
+    const userRole = req.userRole;
+    const userWeb = req.userWeb;
+    const userId = req.session.userId;
+    
+    let query = 'SELECT * FROM employees';
+    let params = [];
+    let whereConditions = [];
+    
+    // Non-admin/boss: restrict by web or user_id
+    if (userRole !== 'admin' && userRole !== 'boss') {
+      if (userRole === 'leader') {
+        // Leader sees all employees in their assigned web
+        if (userWeb) {
+          whereConditions.push('web = $1');
+          params.push(userWeb);
+        }
+      } else if (userRole === 'cs' || userRole === 'joker') {
+        // CS/Joker see only their own linked employee record
+        whereConditions.push('user_id = $1');
+        params.push(userId);
+      }
+    }
+    
+    if (whereConditions.length) {
+      query += ' WHERE ' + whereConditions.join(' AND ');
+    }
+    query += ' ORDER BY id';
+    
+    const result = await db.query(query, params);
+    const employees = result.rows;
+    
+    res.render('hr/employees', {
+      employees,
+      error: null,
+      success: null,
+      role: userRole,
+      canEdit: ['admin', 'boss', 'leader'].includes(userRole)
+    });
+  } catch (err) {
+    console.error(err);
+    res.render('hr/employees', { employees: [], error: 'Failed to load employees', success: null });
+  }
+});
+
+// Form to add employee (admin, boss, leader only)
+app.get('/hr/employees/create', requireLogin, requireHRAccess, async (req, res) => {
+  const userRole = req.userRole;
+  if (!['admin', 'boss', 'leader'].includes(userRole)) {
+    return res.status(403).send('Access denied');
+  }
+  // Fetch users for linking (for admin/boss)
+  let users = [];
+  if (userRole === 'admin' || userRole === 'boss') {
+    users = (await db.query('SELECT id, email FROM users ORDER BY email')).rows;
+  }
+  res.render('hr/create-employee', { error: null, role: userRole, users, userWeb: req.userWeb });
+});
+
+app.post('/hr/employees/create', requireLogin, requireHRAccess, async (req, res) => {
+  const userRole = req.userRole;
+  if (!['admin', 'boss', 'leader'].includes(userRole)) {
+    return res.status(403).send('Access denied');
+  }
+  const { employee_code, full_name, email, phone, department, position, join_date, status, user_id, web } = req.body;
+  const assignedWeb = (userRole === 'leader') ? req.userWeb : web;
+  
+  try {
+    await db.query(
+      `INSERT INTO employees (employee_code, full_name, email, phone, department, position, join_date, status, user_id, web)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [employee_code, full_name, email, phone, department, position, join_date, status || 'active', user_id || null, assignedWeb || null]
+    );
+    res.redirect('/hr/employees?success=Employee added');
+  } catch (err) {
+    let users = [];
+    if (userRole === 'admin' || userRole === 'boss') {
+      users = (await db.query('SELECT id, email FROM users ORDER BY email')).rows;
+    }
+    res.render('hr/create-employee', { error: 'Employee code may already exist', role: userRole, users, userWeb: req.userWeb });
+  }
+});
+
+// Edit form (admin, boss, leader only)
+app.get('/hr/employees/:id/edit', requireLogin, requireHRAccess, async (req, res) => {
+  const userRole = req.userRole;
+  if (!['admin', 'boss', 'leader'].includes(userRole)) {
+    return res.status(403).send('Access denied');
+  }
+  try {
+    const id = req.params.id;
+    const result = await db.query('SELECT * FROM employees WHERE id = $1', [id]);
+    if (result.rows.length === 0) return res.redirect('/hr/employees');
+    const employee = result.rows[0];
+    
+    let users = [];
+    if (userRole === 'admin' || userRole === 'boss') {
+      users = (await db.query('SELECT id, email FROM users ORDER BY email')).rows;
+    }
+    res.render('hr/edit-employee', { employee, error: null, role: userRole, users, userWeb: req.userWeb });
+  } catch (err) {
+    res.redirect('/hr/employees');
+  }
+});
+
+app.post('/hr/employees/:id/edit', requireLogin, requireHRAccess, async (req, res) => {
+  const userRole = req.userRole;
+  if (!['admin', 'boss', 'leader'].includes(userRole)) {
+    return res.status(403).send('Access denied');
+  }
+  const id = req.params.id;
+  const { employee_code, full_name, email, phone, department, position, join_date, status, user_id, web } = req.body;
+  const assignedWeb = (userRole === 'leader') ? req.userWeb : web;
+  
+  try {
+    await db.query(
+      `UPDATE employees SET employee_code=$1, full_name=$2, email=$3, phone=$4, department=$5, position=$6, join_date=$7, status=$8, user_id=$9, web=$10, updated_at=NOW()
+       WHERE id=$11`,
+      [employee_code, full_name, email, phone, department, position, join_date, status, user_id || null, assignedWeb || null, id]
+    );
+    res.redirect('/hr/employees?success=Employee updated');
+  } catch (err) {
+    const employee = (await db.query('SELECT * FROM employees WHERE id=$1', [id])).rows[0];
+    let users = [];
+    if (userRole === 'admin' || userRole === 'boss') {
+      users = (await db.query('SELECT id, email FROM users ORDER BY email')).rows;
+    }
+    res.render('hr/edit-employee', { employee, error: 'Update failed', role: userRole, users, userWeb: req.userWeb });
+  }
+});
+
+// Delete (admin, boss only)
+app.post('/hr/employees/:id/delete', requireLogin, requireHRAccess, async (req, res) => {
+  const userRole = req.userRole;
+  if (!['admin', 'boss'].includes(userRole)) {
+    return res.status(403).send('Access denied');
+  }
+  await db.query('DELETE FROM employees WHERE id=$1', [req.params.id]);
+  res.redirect('/hr/employees?success=Employee deleted');
 });
 
 // ---------- Start Server ----------

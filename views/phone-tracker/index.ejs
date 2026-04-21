@@ -21,7 +21,8 @@
           <div>
             <a href="/phone-tracker?reminder=true"><button style="width:auto; padding:0.7rem 1.5rem; background:#ffc107; color:#000;">⏰ Reminder (60 days)</button></a>
             <a href="/phone-tracker/create"><button style="width:auto; padding:0.7rem 1.5rem;">➕ Add Single</button></a>
-            <a href="/phone-tracker/bulk"><button style="width:auto; padding:0.7rem 1.5rem;">➕ Bulk Import</button></a>
+            <a href="/phone-tracker/bulk"><button style="width:auto; padding:0.7rem 1.5rem;">📋 Bulk Import</button></a>
+            <button id="deleteSelectedBtn" style="width:auto; padding:0.7rem 1.5rem; background:#dc2626; color:white;" onclick="deleteSelected()">🗑️ Delete Selected</button>
           </div>
         </div>
 
@@ -32,57 +33,70 @@
           <div class="alert alert-error"><%= error %></div>
         <% } %>
 
-        <div class="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th>No</th><th>Name</th><th>Bank</th><th>Code</th><th>Phone</th><th>Expired</th><th>Notes</th><th>Web</th><th>Credit</th><th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              <% subscriptions.forEach(sub => { 
-                let rowClass = '';
-                const today = new Date(); today.setHours(0,0,0,0);
-                const exp = new Date(sub.expired); exp.setHours(0,0,0,0);
-                const diffDays = Math.ceil((exp - today) / (1000 * 60 * 60 * 24));
-                if (diffDays < 0) rowClass = 'expired';
-                else if (diffDays <= 60) rowClass = 'expiring-soon';
-              %>
-                <tr class="<%= rowClass %>">
-                  <td><%= sub.display_order || sub.id %></td>
-                  <td><%= sub.name %></td>
-                  <td><%= sub.bank || '' %></td>
-                  <td><%= sub.code || '' %></td>
-                  <td><%= sub.phone %></td>
-                  <td><%= formatDate(sub.expired) %></td>
-                  <td><%= sub.notes || '' %></td>
-                  <td><%= sub.web %></td>
-                  <td><%= sub.credit || '' %></td>
-                  <td>
-                    <a href="/phone-tracker/<%= sub.id %>/edit" class="action-link">Edit</a>
-                    <% if (role === 'admin') { %>
-                      <form method="POST" action="/phone-tracker/<%= sub.id %>/delete" style="display:inline;" onsubmit="return confirm('Delete?');">
-                        <button type="submit" class="btn-delete">Del</button>
-                      </form>
-                    <% } %>
-                    <%
-                    function formatDate(dateStr) {
-                    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agt', 'Sep', 'Okt', 'Nov', 'Des'];
-                    const d = new Date(dateStr);
-                    return d.getDate() + '-' + months[d.getMonth()] + '-' + d.getFullYear();
-                    }
-                    %>
-                    <!-- Then use: <%= formatDate(sub.expired) %> -->
-                  </td>
+        <form id="bulkDeleteForm" method="POST" action="/phone-tracker/bulk-delete">
+          <div class="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width:30px;"><input type="checkbox" id="selectAll" onclick="toggleAll(this)"></th>
+                  <th>No</th><th>Name</th><th>Bank</th><th>Code</th><th>Phone</th><th>Expired</th><th>Notes</th><th>Web</th><th>Credit</th><th>Actions</th>
                 </tr>
-              <% }) %>
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                <% subscriptions.forEach(sub => { 
+                  let rowClass = '';
+                  const today = new Date(); today.setHours(0,0,0,0);
+                  const exp = new Date(sub.expired); exp.setHours(0,0,0,0);
+                  const diffDays = Math.ceil((exp - today) / (1000 * 60 * 60 * 24));
+                  if (diffDays < 0) rowClass = 'expired';
+                  else if (diffDays <= 60) rowClass = 'expiring-soon';
+                %>
+                  <tr class="<%= rowClass %>">
+                    <td><input type="checkbox" name="ids" value="<%= sub.id %>" class="rowCheckbox"></td>
+                    <td><%= sub.display_order || sub.id %></td>
+                    <td><%= sub.name %></td>
+                    <td><%= sub.bank || '' %></td>
+                    <td><%= sub.code || '' %></td>
+                    <td><%= sub.phone %></td>
+                    <td><%= sub.expired %></td>
+                    <td><%= sub.notes || '' %></td>
+                    <td><%= sub.web %></td>
+                    <td><%= sub.credit || '' %></td>
+                    <td>
+                      <a href="/phone-tracker/<%= sub.id %>/edit" class="action-link">Edit</a>
+                      <% if (role === 'admin' || role === 'boss') { %>
+                        <form method="POST" action="/phone-tracker/<%= sub.id %>/delete" style="display:inline;" onsubmit="return confirm('Delete?');">
+                          <button type="submit" class="btn-delete">Del</button>
+                        </form>
+                      <% } %>
+                    </td>
+                  </tr>
+                <% }) %>
+              </tbody>
+            </table>
+          </div>
+        </form>
       </div>
     </div>
   </main>
 
   <%- include('../partials/footer') %>
+
+  <script>
+    function toggleAll(source) {
+      const checkboxes = document.querySelectorAll('.rowCheckbox');
+      checkboxes.forEach(cb => cb.checked = source.checked);
+    }
+
+    function deleteSelected() {
+      const checkboxes = document.querySelectorAll('.rowCheckbox:checked');
+      if (checkboxes.length === 0) {
+        alert('No rows selected.');
+        return;
+      }
+      if (!confirm(`Delete ${checkboxes.length} selected entries?`)) return;
+      document.getElementById('bulkDeleteForm').submit();
+    }
+  </script>
 </body>
 </html>

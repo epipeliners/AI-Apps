@@ -1,10 +1,25 @@
 <header>✨ AI Apps Dashboard</header>
+<%
+  const userRole = typeof role !== 'undefined' ? role : 'user';
+  const isAdminOrBoss = userRole === 'admin' || userRole === 'boss';
+  const canAccessHR = isAdminOrBoss || userRole === 'leader' || userRole === 'cs' || userRole === 'joker';
+%>
+
+<% if (isAdminOrBoss) { %>
+  <a href="/admin/whitelist">🛡️ IP Whitelist</a>
+<% } %>
 <nav>
   <a href="/dashboard">🏠 Home</a>
   <a href="/profile">🔐 Profile & 2FA</a>
-  <% if (typeof role !== 'undefined' && role === 'admin') { %>
+  
+  <% if (isAdminOrBoss) { %>
     <a href="/admin/users">👥 Manage Users</a>
   <% } %>
+  
+  <% if (canAccessHR) { %>
+    <a href="/hr/employees">👔 HR</a>
+  <% } %>
+  
   <a href="/tools/calculator">🧮 Calculator</a>
   <a href="/tools/converter">🔄 Format Converter</a>
   <a href="/phone-tracker">📱 Phone Tracker</a>

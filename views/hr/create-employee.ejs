@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Add Employee</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <%- include('../partials/header', { role }) %>
+
+  <main>
+    <div class="container">
+      <div class="card" style="max-width:600px; margin:0 auto;">
+        <h2>➕ New Employee</h2>
+        <% if (typeof error !== 'undefined' && error) { %>
+          <div class="alert alert-error"><%= error %></div>
+        <% } %>
+        <form method="POST">
+          <input type="text" name="employee_code" placeholder="Employee Code" required>
+          <input type="text" name="full_name" placeholder="Full Name" required>
+          <input type="email" name="email" placeholder="Email">
+          <input type="text" name="phone" placeholder="Phone">
+          <input type="text" name="department" placeholder="Department">
+          <input type="text" name="position" placeholder="Position">
+          <input type="date" name="join_date" placeholder="Join Date">
+          <select name="status">
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+          </select>
+          
+          <% if (role === 'admin' || role === 'boss') { %>
+            <label>Link to User Account (for CS/Joker)</label>
+            <select name="user_id">
+              <option value="">-- None --</option>
+              <% users.forEach(u => { %>
+                <option value="<%= u.id %>"><%= u.email %></option>
+              <% }) %>
+            </select>
+            <label>Web</label>
+            <input type="text" name="web" placeholder="e.g., WebA">
+          <% } else { %>
+            <!-- Leader: web is auto-assigned to their own web_access -->
+            <input type="hidden" name="web" value="<%= userWeb %>">
+          <% } %>
+          
+          <button type="submit">Save Employee</button>
+          <a href="/hr/employees"><button type="button" class="secondary">Cancel</button></a>
+        </form>
+      </div>
+    </div>
+  </main>
+
+  <%- include('../partials/footer') %>
+</body>
+</html>

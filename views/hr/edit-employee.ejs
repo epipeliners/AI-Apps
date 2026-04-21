@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Edit Employee</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <%- include('../partials/header', { role }) %>
+
+  <main>
+    <div class="container">
+      <div class="card" style="max-width:600px; margin:0 auto;">
+        <h2>✏️ Edit Employee</h2>
+        <% if (typeof error !== 'undefined' && error) { %>
+          <div class="alert alert-error"><%= error %></div>
+        <% } %>
+        <form method="POST">
+          <input type="text" name="employee_code" value="<%= employee.employee_code %>" required>
+          <input type="text" name="full_name" value="<%= employee.full_name %>" required>
+          <input type="email" name="email" value="<%= employee.email || '' %>">
+          <input type="text" name="phone" value="<%= employee.phone || '' %>">
+          <input type="text" name="department" value="<%= employee.department || '' %>">
+          <input type="text" name="position" value="<%= employee.position || '' %>">
+          <input type="date" name="join_date" value="<%= employee.join_date || '' %>">
+          <select name="status">
+            <option value="active" <%= employee.status === 'active' ? 'selected' : '' %>>Active</option>
+            <option value="inactive" <%= employee.status === 'inactive' ? 'selected' : '' %>>Inactive</option>
+          </select>
+          
+          <% if (role === 'admin' || role === 'boss') { %>
+            <label>Link to User Account</label>
+            <select name="user_id">
+              <option value="">-- None --</option>
+              <% users.forEach(u => { %>
+                <option value="<%= u.id %>" <%= employee.user_id == u.id ? 'selected' : '' %>><%= u.email %></option>
+              <% }) %>
+            </select>
+            <label>Web</label>
+            <input type="text" name="web" value="<%= employee.web || '' %>">
+          <% } else { %>
+            <input type="hidden" name="web" value="<%= employee.web %>">
+          <% } %>
+          
+          <button type="submit">Update Employee</button>
+          <a href="/hr/employees"><button type="button" class="secondary">Cancel</button></a>
+        </form>
+      </div>
+    </div>
+  </main>
+
+  <%- include('../partials/footer') %>
+</body>
+</html>

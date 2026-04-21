@@ -23,6 +23,8 @@
           <input type="date" name="expired" value="<%= sub.expired %>" required>
           <label>Notes</label>
           <textarea name="notes"><%= sub.notes || '' %></textarea>
+          <label>Credit</label>
+          <input type="text" name="credit" value="<%= sub.credit || '' %>">
           <button type="submit">Save Changes</button>
           <a href="/phone-tracker"><button type="button" class="secondary">Cancel</button></a>
         </form>

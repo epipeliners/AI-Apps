@@ -1,27 +1,47 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Create User</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Create User · Admin</title>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-    <%- include('../partials/header', { role }) %>
-    <main>
-  <div class="container">
-    <h2>Create New User</h2>
-    <% if (error) { %><p class="error"><%= error %></p><% } %>
-    <form method="POST">
-      <input type="email" name="email" placeholder="Email" required>
-      <input type="password" name="password" placeholder="Password" required>
-      <select name="role">
-        <option value="user">User</option>
-        <option value="admin">Admin</option>
-      </select>
-      <button type="submit">Create</button>
-    </form>
-    <p><a href="/admin/users">Cancel</a></p>
-  </div>
+  <%- include('../partials/header', { role }) %>
+
+  <main>
+    <div class="container">
+      <div class="card" style="max-width:500px; margin:0 auto;">
+        <h2>➕ Create New User</h2>
+        <% if (typeof error !== 'undefined' && error) { %>
+          <div class="alert alert-error"><%= error %></div>
+        <% } %>
+        <form method="POST">
+          <input type="email" name="email" placeholder="Email address" required>
+          <input type="password" name="password" placeholder="Password" required>
+
+          <label>Role</label>
+          <select name="role">
+            <option value="admin" <%= user.role === 'admin' ? 'selected' : '' %>>Admin (Full Access)</option>
+            <option value="boss" <%= user.role === 'boss' ? 'selected' : '' %>>Boss (Full Access)</option>
+            <option value="leader" <%= user.role === 'leader' ? 'selected' : '' %>>Leader (HR Full + All Tools)</option>
+            <option value="cs" <%= user.role === 'cs' ? 'selected' : '' %>>CS (HR Own Data + Tools)</option>
+            <option value="joker" <%= user.role === 'joker' ? 'selected' : '' %>>Joker (HR Own Data + Tools)</option>
+            <option value="user" <%= user.role === 'user' ? 'selected' : '' %>>User (Calculator & Converter Only)</option>
+          </select>
+          
+          <!-- New field: Web Access -->
+          <label>Web Access (for Phone Tracker)</label>
+          <input type="text" name="web_access" placeholder="e.g., WebA, WebB">
+          <small>Leave empty for admin to see all webs. Users with this value will only see matching "Web" column in Phone Tracker.</small>
+
+          <button type="submit">Create Account</button>
+          <a href="/admin/users"><button type="button" class="secondary" style="margin-top:0.5rem;">Cancel</button></a>
+        </form>
+      </div>
+    </div>
   </main>
-    <%- include('../partials/footer', { role }) %>
+
+  <%- include('../partials/footer') %>
 </body>
 </html>
