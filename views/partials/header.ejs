@@ -5,9 +5,6 @@
   const canAccessHR = isAdminOrBoss || userRole === 'leader' || userRole === 'cs' || userRole === 'joker';
 %>
 
-<% if (isAdminOrBoss) { %>
-  <a href="/admin/whitelist">🛡️ IP Whitelist</a>
-<% } %>
 <nav>
   <a href="/dashboard">🏠 Home</a>
   <a href="/profile">🔐 Profile & 2FA</a>

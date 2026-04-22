@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>IP Whitelist · <%= user.email %></title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <%- include('../partials/header', { role }) %>
+
+  <main>
+    <div class="container">
+      <div class="card">
+        <h2>🛡️ IP Whitelist for <%= user.email %></h2>
+        <p><a href="/admin/users">← Back to Users</a></p>
+
+        <% if (typeof success !== 'undefined' && success) { %><div class="alert alert-success"><%= success %></div><% } %>
+        <% if (typeof error !== 'undefined' && error) { %><div class="alert alert-error"><%= error %></div><% } %>
+
+        <h3>Add New IP / Range</h3>
+        <form method="POST" action="/admin/users/<%= userId %>/whitelist/add">
+          <input type="text" name="ip_range" placeholder="IP or CIDR (e.g., 192.168.1.100 or 10.0.0.0/8)" required>
+          <input type="text" name="label" placeholder="Label (e.g., Office, Home)">
+          <button type="submit">Add</button>
+        </form>
+
+        <h3>Current Whitelist Entries</h3>
+        <% if (whitelist.length === 0) { %>
+          <p>No entries yet.</p>
+        <% } else { %>
+          <table>
+            <thead><tr><th>Label</th><th>IP/Range</th><th>Added</th><th>Action</th></tr></thead>
+            <tbody>
+              <% whitelist.forEach(entry => { %>
+                <tr>
+                  <td><%= entry.label || '-' %></td>
+                  <td><code><%= entry.ip_range %></code></td>
+                  <td><%= entry.created_at.toISOString().split('T')[0] %></td>
+                  <td>
+                    <form method="POST" action="/admin/users/<%= userId %>/whitelist/remove" onsubmit="return confirm('Remove this entry?');">
+                      <input type="hidden" name="entryId" value="<%= entry.id %>">
+                      <button type="submit" class="btn-delete">Remove</button>
+                    </form>
+                  </td>
+                </tr>
+              <% }) %>
+            </tbody>
+          </table>
+        <% } %>
+      </div>
+    </div>
+  </main>
+
+  <%- include('../partials/footer') %>
+</body>
+</html>

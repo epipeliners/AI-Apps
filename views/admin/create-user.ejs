@@ -22,18 +22,17 @@
 
           <label>Role</label>
           <select name="role">
-            <option value="admin" <%= user.role === 'admin' ? 'selected' : '' %>>Admin (Full Access)</option>
-            <option value="boss" <%= user.role === 'boss' ? 'selected' : '' %>>Boss (Full Access)</option>
-            <option value="leader" <%= user.role === 'leader' ? 'selected' : '' %>>Leader (HR Full + All Tools)</option>
-            <option value="cs" <%= user.role === 'cs' ? 'selected' : '' %>>CS (HR Own Data + Tools)</option>
-            <option value="joker" <%= user.role === 'joker' ? 'selected' : '' %>>Joker (HR Own Data + Tools)</option>
-            <option value="user" <%= user.role === 'user' ? 'selected' : '' %>>User (Calculator & Converter Only)</option>
+            <option value="admin">Admin (Full Access)</option>
+            <option value="boss">Boss (Full Access)</option>
+            <option value="leader">Leader (HR Full + All Tools)</option>
+            <option value="cs">CS (HR Own Data + Tools)</option>
+            <option value="joker">Joker (HR Own Data + Tools)</option>
+            <option value="user" selected>User (Calculator & Converter Only)</option>
           </select>
-          
-          <!-- New field: Web Access -->
+
           <label>Web Access (for Phone Tracker)</label>
           <input type="text" name="web_access" placeholder="e.g., WebA, WebB">
-          <small>Leave empty for admin to see all webs. Users with this value will only see matching "Web" column in Phone Tracker.</small>
+          <small>Leave empty for admin/boss to see all webs.</small>
 
           <button type="submit">Create Account</button>
           <a href="/admin/users"><button type="button" class="secondary" style="margin-top:0.5rem;">Cancel</button></a>

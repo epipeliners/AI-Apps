@@ -7,7 +7,7 @@ const QRCode = require('qrcode');
 const pgSession = require('connect-pg-simple')(session);
 const db = require('./database'); // PostgreSQL pool
 const axios = require('axios');
-const { ipWhitelistMiddleware, logAccess } = require('./ipWhitelist');
+const { ipWhitelistMiddleware } = require('./ipWhitelist');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -26,6 +26,7 @@ app.use(session({
   saveUninitialized: false,
   cookie: { maxAge: 30 * 24 * 60 * 60 * 1000 } // 30 days
 }));
+app.use(ipWhitelistMiddleware);
 
 // Helper: require login
 function requireLogin(req, res, next) {
@@ -203,12 +204,14 @@ app.post('/login', verifyRecaptcha, async (req, res) => {
     if (user.twofa_enabled) {
       req.session.tempUserId = user.id;
       req.session.tempUserEmail = user.email;
+      req.session.userRole = user.role;
       return res.redirect('/verify-2fa');
     }
 
     // No 2FA, log in directly
     req.session.userId = user.id;
     req.session.userEmail = user.email;
+    req.session.userRole = user.role;
     res.redirect('/dashboard');
   } catch (err) {
     console.error(err);
@@ -739,33 +742,53 @@ app.get('/admin/users/:id/edit', requireAdmin, async (req, res) => {
   }
 });
 
-// IP Whitelist Management
-app.get('/admin/whitelist', requireAdmin, (req, res) => {
-  const { getWhitelist, getAccessLogs } = require('./ipWhitelist');
-  res.render('admin/whitelist', {
-    whitelist: getWhitelist(),
-    logs: getAccessLogs().slice(0, 100), // show last 100
-    error: null,
-    success: null,
-    role: 'admin' // or pass actual role
-  });
-});
-
-app.post('/admin/whitelist/add', requireAdmin, (req, res) => {
-  const { ip } = req.body;
-  const { addToWhitelist } = require('./ipWhitelist');
-  if (addToWhitelist(ip)) {
-    res.redirect('/admin/whitelist?success=IP added');
-  } else {
-    res.redirect('/admin/whitelist?error=IP already exists');
+// View whitelist for a specific user (admin selects user)
+app.get('/admin/users/:id/whitelist', requireAdmin, async (req, res) => {
+  try {
+    const userId = req.params.id;
+    const userResult = await db.query('SELECT email FROM users WHERE id = $1', [userId]);
+    if (userResult.rows.length === 0) return res.redirect('/admin/users');
+    
+    const { getUserWhitelist } = require('./ipWhitelist');
+    const whitelist = await getUserWhitelist(userId);
+    
+    res.render('admin/user-whitelist', {
+      user: userResult.rows[0],
+      userId,
+      whitelist,
+      error: null,
+      success: null,
+      role: 'admin' // or pass actual role
+    });
+  } catch (err) {
+    res.redirect('/admin/users?error=Failed to load whitelist');
   }
 });
 
-app.post('/admin/whitelist/remove', requireAdmin, (req, res) => {
-  const { ip } = req.body;
-  const { removeFromWhitelist } = require('./ipWhitelist');
-  removeFromWhitelist(ip);
-  res.redirect('/admin/whitelist?success=IP removed');
+// Add entry to user's whitelist
+app.post('/admin/users/:id/whitelist/add', requireAdmin, async (req, res) => {
+  const userId = req.params.id;
+  const { ip_range, label } = req.body;
+  try {
+    const { addUserWhitelist } = require('./ipWhitelist');
+    await addUserWhitelist(userId, ip_range, label);
+    res.redirect(`/admin/users/${userId}/whitelist?success=Entry added`);
+  } catch (err) {
+    res.redirect(`/admin/users/${userId}/whitelist?error=Failed to add`);
+  }
+});
+
+// Remove entry
+app.post('/admin/users/:id/whitelist/remove', requireAdmin, async (req, res) => {
+  const userId = req.params.id;
+  const { entryId } = req.body;
+  try {
+    const { removeUserWhitelist } = require('./ipWhitelist');
+    await removeUserWhitelist(entryId);
+    res.redirect(`/admin/users/${userId}/whitelist?success=Entry removed`);
+  } catch (err) {
+    res.redirect(`/admin/users/${userId}/whitelist?error=Failed to remove`);
+  }
 });
 
 app.post('/admin/users/:id/edit', requireAdmin, async (req, res) => {
