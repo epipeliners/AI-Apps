@@ -338,3 +338,20 @@ footer {
   max-width: 420px;
   margin: 2rem;
 }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: auto;  /* allow flexible column widths */
+  white-space: nowrap; /* prevent text from wrapping */
+}
+
+th, td {
+  padding: 8px 12px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+/* Allow specific columns to wrap if needed */
+td:nth-child(2) { white-space: normal; } /* Name column can wrap */
+td:nth-child(7) { white-space: normal; } /* Notes can wrap */

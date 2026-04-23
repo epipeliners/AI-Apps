@@ -6,6 +6,7 @@
     "start": "node server.js"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.104.0",
     "axios": "^1.15.0",
     "bcrypt": "^5.1.1",
     "connect-pg-simple": "^10.0.0",
@@ -15,6 +16,7 @@
     "express-recaptcha": "^5.1.0",
     "express-session": "^1.17.3",
     "ip-range-check": "^0.2.0",
+    "multer": "^2.1.1",
     "pg": "^8.20.0",
     "qrcode": "^1.5.3",
     "speakeasy": "^2.0.0"

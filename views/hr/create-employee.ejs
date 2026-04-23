@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Add Employee</title>
+  <title>Add Employee · HR</title>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -16,7 +16,7 @@
         <% if (typeof error !== 'undefined' && error) { %>
           <div class="alert alert-error"><%= error %></div>
         <% } %>
-        <form method="POST">
+        <form method="POST" enctype="multipart/form-data">
           <input type="text" name="employee_code" placeholder="Employee Code" required>
           <input type="text" name="full_name" placeholder="Full Name" required>
           <input type="email" name="email" placeholder="Email">
@@ -28,9 +28,14 @@
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>
           </select>
-          
+
+          <!-- Photo upload -->
+          <label>Photo (PNG only, max 2MB)</label>
+          <input type="file" name="photo" accept="image/png" onchange="previewImage(event)">
+          <img id="photoPreview" style="max-width:150px; margin-top:10px; display:none;">
+
           <% if (role === 'admin' || role === 'boss') { %>
-            <label>Link to User Account (for CS/Joker)</label>
+            <label>Link to User Account</label>
             <select name="user_id">
               <option value="">-- None --</option>
               <% users.forEach(u => { %>
@@ -40,10 +45,10 @@
             <label>Web</label>
             <input type="text" name="web" placeholder="e.g., WebA">
           <% } else { %>
-            <!-- Leader: web is auto-assigned to their own web_access -->
             <input type="hidden" name="web" value="<%= userWeb %>">
           <% } %>
-          
+
+          <!-- ✅ ONLY ONE SUBMIT BUTTON -->
           <button type="submit">Save Employee</button>
           <a href="/hr/employees"><button type="button" class="secondary">Cancel</button></a>
         </form>
@@ -52,5 +57,16 @@
   </main>
 
   <%- include('../partials/footer') %>
+
+  <script>
+    function previewImage(event) {
+      const preview = document.getElementById('photoPreview');
+      const file = event.target.files[0];
+      if (file) {
+        preview.src = URL.createObjectURL(file);
+        preview.style.display = 'block';
+      }
+    }
+  </script>
 </body>
 </html>

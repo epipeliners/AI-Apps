@@ -8,9 +8,31 @@ const pgSession = require('connect-pg-simple')(session);
 const db = require('./database'); // PostgreSQL pool
 const axios = require('axios');
 const { ipWhitelistMiddleware } = require('./ipWhitelist');
+const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
+const multer = require('multer');
+
+// Memory storage (file in buffer)
+const storage = multer.memoryStorage();
+
+const upload = multer({
+  storage: storage,
+  limits: { fileSize: 2 * 1024 * 1024 }, // 2MB
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === 'image/png') {
+      cb(null, true);
+    } else {
+      cb(new Error('Only PNG images are allowed'), false);
+    }
+  }
+});
 const PORT = process.env.PORT || 3000;
+
+// Supabase client for storage
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY; // Use service_role for server-side
+const supabase = createClient(supabaseUrl, supabaseKey);
 
 // Middleware
 app.use(express.urlencoded({ extended: true }));
@@ -174,6 +196,41 @@ async function requireHRAccess(req, res, next) {
     next();
   } catch (err) {
     return res.status(500).send('Server error');
+  }
+}
+
+async function uploadPhotoToSupabase(fileBuffer, fileName) {
+  const bucketName = 'employee-photos';
+  const filePath = `employees/${Date.now()}-${fileName}`;
+  
+  const { data, error } = await supabase.storage
+    .from(bucketName)
+    .upload(filePath, fileBuffer, {
+      contentType: 'image/png',
+      upsert: false
+    });
+  
+  if (error) throw error;
+  
+  // Get public URL
+  const { data: publicUrlData } = supabase.storage
+    .from(bucketName)
+    .getPublicUrl(filePath);
+  
+  return publicUrlData.publicUrl;
+}
+
+async function deletePhotoFromSupabase(photoUrl) {
+  if (!photoUrl) return;
+  try {
+    const url = new URL(photoUrl);
+    const pathParts = url.pathname.split('/');
+    const bucketIndex = pathParts.indexOf('employee-photos');
+    if (bucketIndex === -1) return;
+    const filePath = pathParts.slice(bucketIndex + 1).join('/');
+    await supabase.storage.from('employee-photos').remove([filePath]);
+  } catch (err) {
+    console.error('Failed to delete photo:', err);
   }
 }
 
@@ -991,7 +1048,7 @@ app.get('/hr/employees/create', requireLogin, requireHRAccess, async (req, res) 
   res.render('hr/create-employee', { error: null, role: userRole, users, userWeb: req.userWeb });
 });
 
-app.post('/hr/employees/create', requireLogin, requireHRAccess, async (req, res) => {
+app.post('/hr/employees/create', requireLogin, requireHRAccess, upload.single('photo'), async (req, res) => {
   const userRole = req.userRole;
   if (!['admin', 'boss', 'leader'].includes(userRole)) {
     return res.status(403).send('Access denied');
@@ -999,67 +1056,64 @@ app.post('/hr/employees/create', requireLogin, requireHRAccess, async (req, res)
   const { employee_code, full_name, email, phone, department, position, join_date, status, user_id, web } = req.body;
   const assignedWeb = (userRole === 'leader') ? req.userWeb : web;
   
+  let photoUrl = null;
   try {
+    if (req.file) {
+      photoUrl = await uploadPhotoToSupabase(req.file.buffer, req.file.originalname);
+    }
+    
     await db.query(
-      `INSERT INTO employees (employee_code, full_name, email, phone, department, position, join_date, status, user_id, web)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-      [employee_code, full_name, email, phone, department, position, join_date, status || 'active', user_id || null, assignedWeb || null]
+      `INSERT INTO employees (employee_code, full_name, email, phone, department, position, join_date, status, user_id, web, photo)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      [employee_code, full_name, email, phone, department, position, join_date, status || 'active', user_id || null, assignedWeb || null, photoUrl]
     );
     res.redirect('/hr/employees?success=Employee added');
   } catch (err) {
-    let users = [];
-    if (userRole === 'admin' || userRole === 'boss') {
-      users = (await db.query('SELECT id, email FROM users ORDER BY email')).rows;
-    }
-    res.render('hr/create-employee', { error: 'Employee code may already exist', role: userRole, users, userWeb: req.userWeb });
-  }
-});
-
-// Edit form (admin, boss, leader only)
-app.get('/hr/employees/:id/edit', requireLogin, requireHRAccess, async (req, res) => {
-  const userRole = req.userRole;
-  if (!['admin', 'boss', 'leader'].includes(userRole)) {
-    return res.status(403).send('Access denied');
-  }
-  try {
-    const id = req.params.id;
-    const result = await db.query('SELECT * FROM employees WHERE id = $1', [id]);
-    if (result.rows.length === 0) return res.redirect('/hr/employees');
-    const employee = result.rows[0];
+    // If upload succeeded but DB failed, attempt to delete the uploaded photo
+    if (photoUrl) await deletePhotoFromSupabase(photoUrl);
     
     let users = [];
     if (userRole === 'admin' || userRole === 'boss') {
       users = (await db.query('SELECT id, email FROM users ORDER BY email')).rows;
     }
-    res.render('hr/edit-employee', { employee, error: null, role: userRole, users, userWeb: req.userWeb });
-  } catch (err) {
-    res.redirect('/hr/employees');
+    res.render('hr/create-employee', { error: err.message, role: userRole, users, userWeb: req.userWeb });
   }
 });
 
-app.post('/hr/employees/:id/edit', requireLogin, requireHRAccess, async (req, res) => {
+// Edit form (admin, boss, leader only)
+app.post('/hr/employees/:id/edit', requireLogin, requireHRAccess, upload.single('photo'), async (req, res) => {
   const userRole = req.userRole;
   if (!['admin', 'boss', 'leader'].includes(userRole)) {
     return res.status(403).send('Access denied');
   }
   const id = req.params.id;
-  const { employee_code, full_name, email, phone, department, position, join_date, status, user_id, web } = req.body;
+  const { employee_code, full_name, email, phone, department, position, join_date, status, user_id, web, existing_photo } = req.body;
   const assignedWeb = (userRole === 'leader') ? req.userWeb : web;
   
+  let photoUrl = existing_photo || null;
   try {
+    if (req.file) {
+      // Upload new photo
+      photoUrl = await uploadPhotoToSupabase(req.file.buffer, req.file.originalname);
+      // Delete old photo if exists
+      if (existing_photo) await deletePhotoFromSupabase(existing_photo);
+    }
+    
     await db.query(
-      `UPDATE employees SET employee_code=$1, full_name=$2, email=$3, phone=$4, department=$5, position=$6, join_date=$7, status=$8, user_id=$9, web=$10, updated_at=NOW()
-       WHERE id=$11`,
-      [employee_code, full_name, email, phone, department, position, join_date, status, user_id || null, assignedWeb || null, id]
+      `UPDATE employees SET employee_code=$1, full_name=$2, email=$3, phone=$4, department=$5, position=$6, join_date=$7, status=$8, user_id=$9, web=$10, photo=$11, updated_at=NOW()
+       WHERE id=$12`,
+      [employee_code, full_name, email, phone, department, position, join_date, status, user_id || null, assignedWeb || null, photoUrl, id]
     );
     res.redirect('/hr/employees?success=Employee updated');
   } catch (err) {
+    if (req.file && photoUrl) await deletePhotoFromSupabase(photoUrl);
+    
     const employee = (await db.query('SELECT * FROM employees WHERE id=$1', [id])).rows[0];
     let users = [];
     if (userRole === 'admin' || userRole === 'boss') {
       users = (await db.query('SELECT id, email FROM users ORDER BY email')).rows;
     }
-    res.render('hr/edit-employee', { employee, error: 'Update failed', role: userRole, users, userWeb: req.userWeb });
+    res.render('hr/edit-employee', { employee, error: err.message, role: userRole, users, userWeb: req.userWeb });
   }
 });
 
@@ -1069,11 +1123,20 @@ app.post('/hr/employees/:id/delete', requireLogin, requireHRAccess, async (req, 
   if (!['admin', 'boss'].includes(userRole)) {
     return res.status(403).send('Access denied');
   }
-  await db.query('DELETE FROM employees WHERE id=$1', [req.params.id]);
-  res.redirect('/hr/employees?success=Employee deleted');
+  const id = req.params.id;
+  try {
+    // Get photo URL before deletion
+    const emp = await db.query('SELECT photo FROM employees WHERE id=$1', [id]);
+    if (emp.rows[0]?.photo) {
+      await deletePhotoFromSupabase(emp.rows[0].photo);
+    }
+    await db.query('DELETE FROM employees WHERE id=$1', [id]);
+    res.redirect('/hr/employees?success=Employee deleted');
+  } catch (err) {
+    res.redirect('/hr/employees?error=Delete failed');
+  }
 });
 
-// ---------- Start Server ----------
 app.listen(PORT, () => {
   console.log(`AI Apps running on http://localhost:${PORT}`);
 });

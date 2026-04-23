@@ -6,8 +6,50 @@
   <title>Phone Tracker · AI Apps</title>
   <link rel="stylesheet" href="/style.css">
   <style>
+    /* Existing reminder styles */
     .expiring-soon { background-color: #fff3cd; }
     .expired { background-color: #f8d7da; }
+
+    /* Improved table layout */
+    .table-container {
+      overflow-x: auto;          /* Horizontal scroll */
+      margin: 1.5rem 0;
+      border-radius: 16px;
+      border: 1px solid #e0e0e0;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      white-space: nowrap;       /* Prevent text wrapping in cells */
+    }
+
+    th, td {
+      padding: 10px 14px;
+      text-align: middle;
+      vertical-align: middle;
+      border-bottom: 1px solid #e0e0e0;
+    }
+
+    th {
+      background-color: #b68929;
+      color: white;
+      font-weight: 600;
+    }
+    
+    th:nth-child(10) {
+      text-align: right;
+    }
+
+    /* Right-align Credit column header and cells */
+    th:nth-child(10) { text-align: right; }
+    td:nth-child(10) { text-align: right; font-family: 'Courier New', monospace; }
+
+    /* Right-align the Credit column (9th column) */
+    td:nth-child(10) {
+      text-align: right;
+      font-family: 'Courier New', monospace;
+    }
   </style>
 </head>
 <body>
@@ -58,7 +100,7 @@
                     <td><%= sub.bank || '' %></td>
                     <td><%= sub.code || '' %></td>
                     <td><%= sub.phone %></td>
-                    <td><%= sub.expired %></td>
+                    <td><%= formatDate(sub.expired) %></td>
                     <td><%= sub.notes || '' %></td>
                     <td><%= sub.web %></td>
                     <td><%= sub.credit || '' %></td>
@@ -97,6 +139,16 @@
       if (!confirm(`Delete ${checkboxes.length} selected entries?`)) return;
       document.getElementById('bulkDeleteForm').submit();
     }
+
+    <%
+    function formatDate(dateStr) {
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agt', 'Sep', 'Okt', 'Nov', 'Des'];
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return dateStr;
+      const day = String(d.getDate()).padStart(2, '0');
+      return day + '-' + months[d.getMonth()] + '-' + d.getFullYear();
+    }
+    %>
   </script>
 </body>
 </html>
