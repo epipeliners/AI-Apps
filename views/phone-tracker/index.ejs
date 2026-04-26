@@ -6,49 +6,43 @@
   <title>Phone Tracker · AI Apps</title>
   <link rel="stylesheet" href="/style.css">
   <style>
-    /* Existing reminder styles */
     .expiring-soon { background-color: #fff3cd; }
     .expired { background-color: #f8d7da; }
-
-    /* Improved table layout */
+    .inactive-row { display: none; }
+    .show-inactive .inactive-row { display: table-row; }
     .table-container {
-      overflow-x: auto;          /* Horizontal scroll */
+      overflow-x: auto;
       margin: 1.5rem 0;
       border-radius: 16px;
       border: 1px solid #e0e0e0;
     }
-
     table {
       width: 100%;
       border-collapse: collapse;
-      white-space: nowrap;       /* Prevent text wrapping in cells */
+      white-space: nowrap;
     }
-
     th, td {
       padding: 10px 14px;
-      text-align: middle;
+      text-align: left;
       vertical-align: middle;
       border-bottom: 1px solid #e0e0e0;
     }
-
     th {
-      background-color: #b68929;
+      background-color: #1e3b5c;
       color: white;
       font-weight: 600;
+      cursor: pointer;
+      user-select: none;
     }
-    
-    th:nth-child(10) {
-      text-align: right;
-    }
-
-    /* Right-align Credit column header and cells */
-    th:nth-child(10) { text-align: right; }
-    td:nth-child(10) { text-align: right; font-family: 'Courier New', monospace; }
-
-    /* Right-align the Credit column (9th column) */
-    td:nth-child(10) {
-      text-align: right;
-      font-family: 'Courier New', monospace;
+    td:nth-child(2) { white-space: normal; } /* Name */
+    td:nth-child(7) { white-space: normal; } /* Notes */
+    th:nth-child(9), td:nth-child(9) { text-align: right; font-family: 'Courier New', monospace; }
+    .filter-bar {
+      margin-bottom: 1rem;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
     }
   </style>
 </head>
@@ -58,9 +52,9 @@
   <main>
     <div class="container">
       <div class="card">
-        <div style="display:flex; justify-content:space-between; align-items:center;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap;">
           <h2>📱 Phone Number Tracker</h2>
-          <div>
+          <div style="display:flex; gap:10px; flex-wrap:wrap;">
             <a href="/phone-tracker?reminder=true"><button style="width:auto; padding:0.7rem 1.5rem; background:#ffc107; color:#000;">⏰ Reminder (60 days)</button></a>
             <a href="/phone-tracker/create"><button style="width:auto; padding:0.7rem 1.5rem;">➕ Add Single</button></a>
             <a href="/phone-tracker/bulk"><button style="width:auto; padding:0.7rem 1.5rem;">📋 Bulk Import</button></a>
@@ -75,30 +69,57 @@
           <div class="alert alert-error"><%= error %></div>
         <% } %>
 
+        <div class="filter-bar">
+          <% if (role === 'admin' || role === 'boss') { %>
+            <form method="GET" action="/phone-tracker" style="display:flex; gap:10px; align-items:center;">
+              <label>Web:</label>
+              <select name="web" onchange="this.form.submit()">
+                <option value="all" <%= (typeof filterWeb !== 'undefined' && filterWeb === 'all') ? 'selected' : '' %>>All</option>
+                <% (typeof webs !== 'undefined' ? webs : []).forEach(w => { %>
+                  <option value="<%= w %>" <%= (typeof filterWeb !== 'undefined' && filterWeb === w) ? 'selected' : '' %>><%= w %></option>
+                <% }) %>
+              </select>
+              <% if (typeof showReminder !== 'undefined' && showReminder) { %><input type="hidden" name="reminder" value="true"><% } %>
+              <noscript><button type="submit">Filter</button></noscript>
+            </form>
+          <% } %>
+          <button id="toggleInactiveBtn" style="width:auto; padding:0.5rem 1rem;" onclick="toggleInactive()">👻 Show Inactive</button>
+        </div>
+
         <form id="bulkDeleteForm" method="POST" action="/phone-tracker/bulk-delete">
-          <div class="table-container">
+          <div class="table-container" id="tableContainer">
             <table>
               <thead>
                 <tr>
-                  <th style="width:30px;"><input type="checkbox" id="selectAll" onclick="toggleAll(this)"></th>
+                  <th><input type="checkbox" id="selectAll" onclick="toggleAll(this)"></th>
                   <th>No</th><th>Name</th><th>Bank</th><th>Code</th><th>Phone</th><th>Expired</th><th>Notes</th><th>Web</th><th>Credit</th><th>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                <% subscriptions.forEach(sub => { 
+                <% 
+                // Date formatter helper
+                const months = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agt','Sep','Okt','Nov','Des'];
+                function formatDate(dateStr) {
+                  const d = new Date(dateStr);
+                  if (isNaN(d.getTime())) return dateStr;
+                  return String(d.getDate()).padStart(2,'0') + '-' + months[d.getMonth()] + '-' + d.getFullYear();
+                }
+                subscriptions.forEach(sub => { 
                   let rowClass = '';
                   const today = new Date(); today.setHours(0,0,0,0);
                   const exp = new Date(sub.expired); exp.setHours(0,0,0,0);
                   const diffDays = Math.ceil((exp - today) / (1000 * 60 * 60 * 24));
                   if (diffDays < 0) rowClass = 'expired';
                   else if (diffDays <= 60) rowClass = 'expiring-soon';
+
+                  const isInactive = sub.notes && /expired|non active|banned/i.test(sub.notes);
                 %>
-                  <tr class="<%= rowClass %>">
+                  <tr class="<%= rowClass %> <%= isInactive ? 'inactive-row' : '' %>">
                     <td><input type="checkbox" name="ids" value="<%= sub.id %>" class="rowCheckbox"></td>
                     <td><%= sub.display_order || sub.id %></td>
                     <td><%= sub.name %></td>
                     <td><%= sub.bank || '' %></td>
-                    <td><%= sub.code || '' %></td>
+                    <td><%= sub.code %></td>
                     <td><%= sub.phone %></td>
                     <td><%= formatDate(sub.expired) %></td>
                     <td><%= sub.notes || '' %></td>
@@ -140,15 +161,12 @@
       document.getElementById('bulkDeleteForm').submit();
     }
 
-    <%
-    function formatDate(dateStr) {
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agt', 'Sep', 'Okt', 'Nov', 'Des'];
-      const d = new Date(dateStr);
-      if (isNaN(d.getTime())) return dateStr;
-      const day = String(d.getDate()).padStart(2, '0');
-      return day + '-' + months[d.getMonth()] + '-' + d.getFullYear();
+    function toggleInactive() {
+      const container = document.getElementById('tableContainer');
+      container.classList.toggle('show-inactive');
+      const btn = document.getElementById('toggleInactiveBtn');
+      btn.textContent = container.classList.contains('show-inactive') ? '👻 Hide Inactive' : '👻 Show Inactive';
     }
-    %>
   </script>
 </body>
 </html>

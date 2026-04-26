@@ -125,10 +125,8 @@ async function verifyRecaptcha(req, res, next) {
 
 async function renumberDisplayOrders(userWeb, userRole) {
   try {
-    let query;
-    let params = [];
     if (userRole === 'admin' || userRole === 'boss') {
-      // Renumber per web
+      // Renumber globally but per web, ordered by code
       const webs = await db.query('SELECT DISTINCT web FROM phone_subscriptions');
       for (const row of webs.rows) {
         const web = row.web;
@@ -136,7 +134,7 @@ async function renumberDisplayOrders(userWeb, userRole) {
           UPDATE phone_subscriptions
           SET display_order = new_order
           FROM (
-            SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS new_order
+            SELECT id, ROW_NUMBER() OVER (ORDER BY code, id) AS new_order
             FROM phone_subscriptions
             WHERE web = $1
           ) AS ranked
@@ -144,12 +142,12 @@ async function renumberDisplayOrders(userWeb, userRole) {
         `, [web]);
       }
     } else {
-      // Renumber only the user's web
+      // Renumber only the user's web, ordered by code
       await db.query(`
         UPDATE phone_subscriptions
         SET display_order = new_order
         FROM (
-          SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS new_order
+          SELECT id, ROW_NUMBER() OVER (ORDER BY code, id) AS new_order
           FROM phone_subscriptions
           WHERE web = $1
         ) AS ranked
@@ -360,46 +358,64 @@ app.get('/profile', requireLogin, async (req, res) => {
 app.get('/phone-tracker', requireLogin, requirePhoneAccess, async (req, res) => {
   try {
     const userWeb = req.userWebAccess;
+    const userId = req.session.userId;
+    const { reminder, web: filterWeb } = req.query;  // get filter parameters
+
     let query = 'SELECT * FROM phone_subscriptions';
     let params = [];
-    let whereClause = '';
-    
+    let conditions = [];
+
+    // Row‑level security
     if (userWeb) {
-      whereClause = ' WHERE web = $1';
-      query += ' ORDER BY display_order, id';
-      const result = await db.query(query, params);
+      conditions.push('web = $' + (params.length + 1));
       params.push(userWeb);
+    } else if (req.userRole !== 'admin' && req.userRole !== 'boss') {
+      // Should not happen, but just in case
+      conditions.push('1 = 0');
     }
-    
-    // Check if reminder filter is active
-    const showReminder = req.query.reminder === 'true';
-    if (showReminder) {
-      const sixtyDaysFromNow = new Date();
-      sixtyDaysFromNow.setDate(sixtyDaysFromNow.getDate() + 60);
+
+    // Web filter (if admin/boss chooses a specific web)
+    if ((req.userRole === 'admin' || req.userRole === 'boss') && filterWeb && filterWeb !== 'all') {
+      conditions.push('web = $' + (params.length + 1));
+      params.push(filterWeb);
+    }
+
+    // Reminder filter
+    if (reminder === 'true') {
       const today = new Date().toISOString().split('T')[0];
-      const future = sixtyDaysFromNow.toISOString().split('T')[0];
-      
-      whereClause = whereClause 
-        ? `${whereClause} AND expired BETWEEN $${params.length+1} AND $${params.length+2}`
-        : ` WHERE expired BETWEEN $1 AND $2`;
-      if (!userWeb) {
-        params = [today, future];
-      } else {
-        params.push(today, future);
-      }
+      const future = new Date();
+      future.setDate(future.getDate() + 60);
+      const futureStr = future.toISOString().split('T')[0];
+      conditions.push(`expired BETWEEN $${params.length+1} AND $${params.length+2}`);
+      params.push(today, futureStr);
     }
-    
-    query += whereClause + ' ORDER BY display_order, id';
+
+    if (conditions.length) {
+      query += ' WHERE ' + conditions.join(' AND ');
+    }
+    // ✅ DEFAULT SORT BY CODE
+    query += ' ORDER BY code, id';
+
     const result = await db.query(query, params);
-    
-    const userRole = (await db.query('SELECT role FROM users WHERE id=$1', [req.session.userId])).rows[0].role;
+    const subscriptions = result.rows;
+
+    // Fetch distinct webs for filter dropdown (if admin/boss)
+    let webs = [];
+    if (req.userRole === 'admin' || req.userRole === 'boss') {
+      const webQuery = 'SELECT DISTINCT web FROM phone_subscriptions ORDER BY web';
+      const webResult = await db.query(webQuery);
+      webs = webResult.rows.map(r => r.web);
+    }
+
     res.render('phone-tracker/index', {
-      subscriptions: result.rows,
-      showReminder,
+      subscriptions,
+      webs,
+      showReminder: reminder === 'true',
+      filterWeb: filterWeb || 'all',
       error: null,
       success: null,
-      role: userRole,
-      canEdit: true, // all logged-in users with access can edit their web's entries
+      role: req.userRole,
+      canEdit: true,
       userWeb
     });
   } catch (err) {
@@ -624,32 +640,44 @@ app.get('/phone-tracker/:id/edit', requireLogin, requirePhoneAccess, async (req,
 
 app.post('/phone-tracker/:id/edit', requireLogin, requirePhoneAccess, async (req, res) => {
   const id = req.params.id;
-  const { phone, expired, notes } = req.body;
+  const { phone, expired, notes, credit, web } = req.body;
   const userWeb = req.userWebAccess;
-  
+  const userRole = req.userRole;
+
+  // Determine final web value
+  let finalWeb;
+  if (userRole === 'admin' || userRole === 'boss') {
+    finalWeb = web || '';  // admin/boss can change web
+  } else {
+    finalWeb = userWeb;    // leader/cs/joker forced to their assigned web
+  }
+
   try {
-    // Verify ownership
+    // Ownership check
     let checkQuery = 'SELECT * FROM phone_subscriptions WHERE id = $1';
     let checkParams = [id];
-    if (userWeb) {
+    if (userRole !== 'admin' && userRole !== 'boss') {
       checkQuery += ' AND web = $2';
       checkParams.push(userWeb);
     }
     const check = await db.query(checkQuery, checkParams);
-    if (check.rows.length === 0) {
-      return res.status(403).send('Access denied');
-    }
-    
+    if (check.rows.length === 0) return res.status(403).send('Access denied');
+
     await db.query(
-      `UPDATE phone_subscriptions SET phone=$1, expired=$2, notes=$3, credit=$4, updated_at=NOW() WHERE id=$5`,
-      [phone, expired, notes, credit, id]
+      `UPDATE phone_subscriptions 
+       SET phone = $1, expired = $2, notes = $3, credit = $4, web = $5, updated_at = NOW()
+       WHERE id = $6`,
+      [phone, expired, notes, credit, finalWeb, id]
     );
-    
+
+    // ✅ Auto‑renumber after edit
+    await renumberDisplayOrders(finalWeb, userRole);
+
     res.redirect('/phone-tracker?success=Entry updated');
   } catch (err) {
-    const sub = (await db.query('SELECT * FROM phone_subscriptions WHERE id=$1', [id])).rows[0];
-    const userRole = (await db.query('SELECT role FROM users WHERE id=$1', [req.session.userId])).rows[0].role;
-    res.render('phone-tracker/edit', { sub, error: 'Update failed', role: userRole });
+    console.error(err);
+    const sub = (await db.query('SELECT * FROM phone_subscriptions WHERE id = $1', [id])).rows[0];
+    res.render('phone-tracker/edit', { sub, error: 'Update failed', role: userRole, userWeb });
   }
 });
 
@@ -937,8 +965,9 @@ app.post('/phone-tracker/create', requireLogin, requirePhoneAccess, async (req, 
 });
 
 app.post('/phone-tracker/bulk-delete', requireLogin, requirePhoneAccess, async (req, res) => {
-  const { ids } = req.body;
-  if (!ids) return res.redirect('/phone-tracker');
+  // ... [your existing code to delete] ...
+  await renumberDisplayOrders(userWeb, userRole);
+  res.redirect('/phone-tracker?success=Selected entries deleted');
 
   const idArray = Array.isArray(ids) ? ids : [ids];
   const userWeb = req.userWebAccess;

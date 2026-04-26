@@ -21,10 +21,37 @@
           <input type="text" name="phone" value="<%= sub.phone %>" required>
           <label>Expired (YYYY-MM-DD) *</label>
           <input type="date" name="expired" value="<%= sub.expired %>" required>
+
+          <!-- ✅ Notes with dropdown (admin/boss can type custom, others use dropdown) -->
           <label>Notes</label>
-          <textarea name="notes"><%= sub.notes || '' %></textarea>
+          <% if (role === 'admin' || role === 'boss') { %>
+            <input type="text" name="notes" value="<%= sub.notes || '' %>" list="notesOptions">
+            <datalist id="notesOptions">
+              <option value="ACTIVE">
+              <option value="EXPIRED">
+              <option value="NON ACTIVE">
+              <option value="BANNED">
+            </datalist>
+          <% } else { %>
+            <select name="notes">
+              <option value="ACTIVE" <%= sub.notes === 'ACTIVE' ? 'selected' : '' %>>ACTIVE</option>
+              <option value="EXPIRED" <%= sub.notes === 'EXPIRED' ? 'selected' : '' %>>EXPIRED</option>
+              <option value="NON ACTIVE" <%= sub.notes === 'NON ACTIVE' ? 'selected' : '' %>>NON ACTIVE</option>
+              <option value="BANNED" <%= sub.notes === 'BANNED' ? 'selected' : '' %>>BANNED</option>
+            </select>
+          <% } %>
+
+          <!-- ✅ Web field (editable for admin/boss, readonly for others) -->
+          <label>Web</label>
+          <% if (role === 'admin' || role === 'boss') { %>
+            <input type="text" name="web" value="<%= sub.web || '' %>">
+          <% } else { %>
+            <input type="text" value="<%= sub.web %>" readonly disabled>
+          <% } %>
+
           <label>Credit</label>
           <input type="text" name="credit" value="<%= sub.credit || '' %>">
+
           <button type="submit">Save Changes</button>
           <a href="/phone-tracker"><button type="button" class="secondary">Cancel</button></a>
         </form>
