@@ -165,14 +165,18 @@ async function requirePhoneAccess(req, res, next) {
   try {
     const result = await db.query('SELECT role, web_access FROM users WHERE id = $1', [req.session.userId]);
     const user = result.rows[0];
-    if (user.role === 'admin') {
-      req.userWebAccess = null; // admin sees all
+    
+    // ✅ ALWAYS store the role
+    req.userRole = user.role;
+
+    if (user.role === 'admin' || user.role === 'boss') {
+      req.userWebAccess = null;          // see all webs
       return next();
     }
     if (!user.web_access) {
       return res.status(403).send('Access denied – no web assigned');
     }
-    req.userWebAccess = user.web_access;
+    req.userWebAccess = user.web_access;  // restrict to this web
     next();
   } catch (err) {
     return res.status(500).send('Server error');
@@ -358,8 +362,9 @@ app.get('/profile', requireLogin, async (req, res) => {
 app.get('/phone-tracker', requireLogin, requirePhoneAccess, async (req, res) => {
   try {
     const userWeb = req.userWebAccess;
-    const userId = req.session.userId;
-    const { reminder, web: filterWeb } = req.query;  // get filter parameters
+    const userRole = req.userRole;
+    const { web: filterWeb, startDate, endDate } = req.query;
+    const exportQuery = new URLSearchParams(req.query).toString();
 
     let query = 'SELECT * FROM phone_subscriptions';
     let params = [];
@@ -369,39 +374,57 @@ app.get('/phone-tracker', requireLogin, requirePhoneAccess, async (req, res) => 
     if (userWeb) {
       conditions.push('web = $' + (params.length + 1));
       params.push(userWeb);
-    } else if (req.userRole !== 'admin' && req.userRole !== 'boss') {
-      // Should not happen, but just in case
+    } else if (userRole !== 'admin' && userRole !== 'boss') {
       conditions.push('1 = 0');
     }
 
-    // Web filter (if admin/boss chooses a specific web)
-    if ((req.userRole === 'admin' || req.userRole === 'boss') && filterWeb && filterWeb !== 'all') {
+    // Web filter (admin/boss)
+    if ((userRole === 'admin' || userRole === 'boss') && filterWeb && filterWeb !== 'all') {
       conditions.push('web = $' + (params.length + 1));
       params.push(filterWeb);
     }
 
-    // Reminder filter
-    if (reminder === 'true') {
-      const today = new Date().toISOString().split('T')[0];
-      const future = new Date();
-      future.setDate(future.getDate() + 60);
-      const futureStr = future.toISOString().split('T')[0];
+    // Date range filter
+    if (startDate && endDate) {
       conditions.push(`expired BETWEEN $${params.length+1} AND $${params.length+2}`);
-      params.push(today, futureStr);
+      params.push(startDate, endDate);
     }
 
     if (conditions.length) {
       query += ' WHERE ' + conditions.join(' AND ');
     }
-    // ✅ DEFAULT SORT BY CODE
     query += ' ORDER BY code, id';
 
     const result = await db.query(query, params);
     const subscriptions = result.rows;
 
-    // Fetch distinct webs for filter dropdown (if admin/boss)
+    // Summary counts (using same conditions)
+    let summary = { active: 0, expiring_soon: 0, expired: 0 };
+    if (conditions.length) {
+      const summaryQuery = `
+        SELECT
+          COUNT(*) FILTER (WHERE expired >= CURRENT_DATE) AS active,
+          COUNT(*) FILTER (WHERE expired BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '60 days') AS expiring_soon,
+          COUNT(*) FILTER (WHERE expired < CURRENT_DATE) AS expired
+        FROM phone_subscriptions
+        WHERE ${conditions.join(' AND ')}
+      `;
+      const summaryResult = await db.query(summaryQuery, params);
+      summary = summaryResult.rows[0];
+    } else {
+      const summaryResult = await db.query(`
+        SELECT
+          COUNT(*) FILTER (WHERE expired >= CURRENT_DATE) AS active,
+          COUNT(*) FILTER (WHERE expired BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '60 days') AS expiring_soon,
+          COUNT(*) FILTER (WHERE expired < CURRENT_DATE) AS expired
+        FROM phone_subscriptions
+      `);
+      summary = summaryResult.rows[0];
+    }
+
+    // Distinct webs for admin filter
     let webs = [];
-    if (req.userRole === 'admin' || req.userRole === 'boss') {
+    if (userRole === 'admin' || userRole === 'boss') {
       const webQuery = 'SELECT DISTINCT web FROM phone_subscriptions ORDER BY web';
       const webResult = await db.query(webQuery);
       webs = webResult.rows.map(r => r.web);
@@ -409,18 +432,21 @@ app.get('/phone-tracker', requireLogin, requirePhoneAccess, async (req, res) => 
 
     res.render('phone-tracker/index', {
       subscriptions,
+      summary,
       webs,
-      showReminder: reminder === 'true',
       filterWeb: filterWeb || 'all',
+      startDate: startDate || '',
+      endDate: endDate || '',
+      exportQuery,
       error: null,
       success: null,
-      role: req.userRole,
+      role: userRole,
       canEdit: true,
       userWeb
     });
   } catch (err) {
     console.error(err);
-    res.render('phone-tracker/index', { subscriptions: [], error: 'Failed to load data', success: null });
+    res.render('phone-tracker/index', { subscriptions: [], summary: {}, webs: [], error: 'Failed to load data', success: null });
   }
 });
 
@@ -466,107 +492,119 @@ app.post('/phone-tracker/bulk', requireLogin, requirePhoneAccess, async (req, re
     return `${year}-${month}-${day}`;
   }
 
-  for (const line of lines) {
-    const trimmedLine = line.trim();
-    
-    // Determine delimiter
-    let parts = [];
-    if (trimmedLine.includes('\t')) {
-      parts = trimmedLine.split('\t');
-    } else {
-      parts = trimmedLine.split(/\s{2,}/);
-      if (parts.length < 5) {
-        const singleSpaceParts = trimmedLine.split(/\s+/);
-        if (singleSpaceParts.length >= 5) {
-          parts = singleSpaceParts;
-        }
+for (const line of lines) {
+  const trimmedLine = line.trim();
+  if (!trimmedLine) continue;
+
+  // ===== 1. Find the date anywhere in the line =====
+  let expired = null;
+  let dateMatch = null;
+
+  const isoDateMatch = trimmedLine.match(/(\d{4}-\d{2}-\d{2})/);
+  if (isoDateMatch) {
+    expired = isoDateMatch[1];
+    dateMatch = isoDateMatch;
+  } else {
+    const indoDateMatch = trimmedLine.match(/(\d{1,2})[-\s\/]+([A-Za-z]{3,})[-\s\/]+(\d{4})/i);
+    if (indoDateMatch) {
+      const parsed = parseIndonesianDate(indoDateMatch[0]);
+      if (parsed) {
+        expired = parsed;
+        dateMatch = indoDateMatch;
       }
-    }
-
-    // Pad parts to at least 9 elements
-    while (parts.length < 9) parts.push('');
-
-    const display_order = parts[0]?.trim() || '';
-    const name = parts[1]?.trim() || '';
-    const bank = parts[2]?.trim() || '';
-    const code = parts[3]?.trim() || '';
-    const phone = parts[4]?.trim() || '';
-    const expiredRaw = parts[5]?.trim() || '';
-    
-    // Handle remaining fields (notes, web, credit)
-    let remaining = parts.slice(6).join(' ').trim();
-    let notes = '';
-    let web = '';
-    let credit = '';
-
-    // Extract credit (numeric at end)
-    const creditMatch = remaining.match(/([\d.,]+)$/);
-    if (creditMatch) {
-      credit = creditMatch[1];
-      remaining = remaining.slice(0, creditMatch.index).trim();
-    }
-
-    if (userWeb) {
-      web = userWeb;
-      notes = remaining;
-    } else {
-      const words = remaining.split(/\s+/);
-      if (words.length >= 2) {
-        web = words.pop();
-        notes = words.join(' ');
-      } else {
-        notes = remaining;
-      }
-    }
-
-    // Validation
-    if (!name || !phone || !expiredRaw) {
-      errors.push(`Missing required fields: ${trimmedLine.substring(0, 60)}...`);
-      continue;
-    }
-
-    // Duplicate check
-    try {
-      const existing = await db.query(
-        'SELECT id FROM phone_subscriptions WHERE phone = $1',
-        [phone]
-      );
-      if (existing.rows.length > 0) {
-        errors.push(`Skipped duplicate phone: ${phone} (${name})`);
-        continue;
-      }
-    } catch (err) {
-      errors.push(`DB error checking duplicate for ${phone}: ${err.message}`);
-      continue;
-    }
-
-    // Parse date
-    let expired;
-    if (/^\d{4}-\d{2}-\d{2}$/.test(expiredRaw)) {
-      expired = expiredRaw;
-    } else {
-      expired = parseIndonesianDate(expiredRaw);
-      if (!expired) {
-        errors.push(`Invalid date format: "${expiredRaw}" – expected DD-MMM-YYYY`);
-        continue;
-      }
-    }
-
-    // Insert
-    try {
-      await db.query(
-        `INSERT INTO phone_subscriptions 
-         (display_order, name, bank, code, phone, expired, notes, web, credit, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-        [display_order, name, bank, code, phone, expired, notes, web, credit, userId]
-      );
-      success.push(`Added: ${name}`);
-    } catch (err) {
-      errors.push(`DB insert error for ${name}: ${err.message}`);
     }
   }
 
-  const userRole = (await db.query('SELECT role FROM users WHERE id=$1', [req.session.userId])).rows[0].role;
+  if (!expired) {
+    errors.push(`No valid date found in: ${trimmedLine.substring(0, 60)}...`);
+    continue;
+  }
+
+  // ===== 2. Split line by the date =====
+  const leftPart = trimmedLine.substring(0, dateMatch.index).trim();
+  const rightPart = trimmedLine.substring(dateMatch.index + dateMatch[0].length).trim();
+
+  // ===== 3. Parse left part: Name, Bank, Code, Phone =====
+  // Use multiple spaces or tabs
+  let leftFields;
+  if (leftPart.includes('\t')) {
+    leftFields = leftPart.split('\t').filter(p => p.trim() !== '');
+  } else {
+    leftFields = leftPart.split(/\s{2,}/).filter(p => p.trim() !== '');
+    if (leftFields.length < 4) {
+      // Try single space split
+      leftFields = leftPart.split(/\s+/).filter(p => p.trim() !== '');
+    }
+  }
+
+  // Remove optional leading number (display_order)
+  if (leftFields.length > 0 && /^\d+$/.test(leftFields[0]) && leftFields.length > 4) {
+    leftFields.shift(); // drop the manual number
+  }
+
+  // Fill missing fields with empty strings
+  while (leftFields.length < 4) leftFields.push('');
+
+  const name = leftFields[0] || '';
+  const bank = leftFields[1] || '';
+  const code = leftFields[2] || '';
+  const phone = leftFields[3] || '';   // ← guaranteed to be the field just before the date
+
+  // ===== 4. Parse right part: Notes, Web, Credit =====
+  let notes = '';
+  let web = '';
+  let credit = '';
+
+  const rightFields = rightPart.split(/\s+/).filter(p => p.trim() !== '');
+  // Extract credit (last numeric)
+  if (rightFields.length > 0 && /^[\d.,]+$/.test(rightFields[rightFields.length - 1])) {
+    credit = rightFields.pop();
+  }
+
+  if (userWeb) {
+    web = userWeb;
+    notes = rightFields.join(' ');
+  } else {
+    // Last remaining word is web (if any)
+    if (rightFields.length > 0) {
+      web = rightFields.pop();
+    }
+    notes = rightFields.join(' ');
+  }
+
+  // ===== 5. Validation =====
+  if (!name || !phone) {
+    errors.push(`Missing name or phone in: ${trimmedLine.substring(0, 60)}...`);
+    continue;
+  }
+
+  // ===== 6. Duplicate check & insert =====
+  try {
+    const existing = await db.query('SELECT id FROM phone_subscriptions WHERE phone = $1', [phone]);
+    if (existing.rows.length > 0) {
+      errors.push(`Skipped duplicate phone: ${phone} (${name})`);
+      continue;
+    }
+  } catch (err) {
+    errors.push(`DB error checking duplicate: ${err.message}`);
+    continue;
+  }
+
+  try {
+    await db.query(
+      `INSERT INTO phone_subscriptions (name, bank, code, phone, expired, notes, web, credit, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [name, bank, code, phone, expired, notes, web, credit, userId]
+    );
+    success.push(`Added: ${name}`);
+  } catch (err) {
+    errors.push(`DB insert error: ${err.message}`);
+  }
+}
+
+  // ✅ Re‑number all rows (per web) after import
+  const userRole = (await db.query('SELECT role FROM users WHERE id = $1', [userId])).rows[0].role;
+  await renumberDisplayOrders(userWeb, userRole);   // userWeb may be null for admin
   res.render('phone-tracker/bulk', {
     error: errors.length ? errors.join('<br>') : null,
     success: success.length ? `Successfully added ${success.length} records.` : null,
@@ -607,6 +645,8 @@ app.post('/phone-tracker/create', requireLogin, requirePhoneAccess, async (req, 
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
       [display_order, name, bank, code, phone, finalExpired, notes, finalWeb, credit, userId]
     );
+    const userRole = (await db.query('SELECT role FROM users WHERE id = $1', [userId])).rows[0].role;
+    await renumberDisplayOrders(userWeb, userRole);
     res.redirect('/phone-tracker?success=Entry added');
   } catch (err) {
     const userRole = (await db.query('SELECT role FROM users WHERE id=$1', [userId])).rows[0].role;
@@ -678,6 +718,72 @@ app.post('/phone-tracker/:id/edit', requireLogin, requirePhoneAccess, async (req
     console.error(err);
     const sub = (await db.query('SELECT * FROM phone_subscriptions WHERE id = $1', [id])).rows[0];
     res.render('phone-tracker/edit', { sub, error: 'Update failed', role: userRole, userWeb });
+  }
+});
+
+app.get('/phone-tracker/export', requireLogin, requirePhoneAccess, async (req, res) => {
+  function formatDateCSV(dateStr) {
+  const months = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agt','Sep','Okt','Nov','Des'];
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return dateStr;
+  return String(d.getDate()).padStart(2,'0') + '-' + months[d.getMonth()] + '-' + d.getFullYear();
+}
+  try {
+    const userWeb = req.userWebAccess;
+    const userRole = req.userRole;
+    const { web: filterWeb, startDate, endDate } = req.query;
+
+    let query = 'SELECT * FROM phone_subscriptions';
+    let params = [];
+    let conditions = [];
+
+    if (userWeb) {
+      conditions.push('web = $' + (params.length + 1));
+      params.push(userWeb);
+    }
+
+    if ((userRole === 'admin' || userRole === 'boss') && filterWeb && filterWeb !== 'all') {
+      conditions.push('web = $' + (params.length + 1));
+      params.push(filterWeb);
+    }
+
+    if (startDate && endDate) {
+      conditions.push(`expired BETWEEN $${params.length+1} AND $${params.length+2}`);
+      params.push(startDate, endDate);
+    }
+
+    if (conditions.length) {
+      query += ' WHERE ' + conditions.join(' AND ');
+    }
+    query += ' ORDER BY code, id';
+
+    const result = await db.query(query, params);
+    const rows = result.rows;
+
+    // Build CSV
+    const headers = ['No', 'Name', 'Bank', 'Code', 'Phone', 'Expired', 'Notes', 'Web', 'Credit'];
+    let csv = headers.join(',') + '\n';
+
+    rows.forEach((row, index) => {
+      csv += [
+        index + 1,
+        `"${(row.name || '').replace(/"/g, '""')}"`,
+        `"${(row.bank || '').replace(/"/g, '""')}"`,
+        `"${(row.code || '').replace(/"/g, '""')}"`,
+        `"${(row.phone || '').replace(/"/g, '""')}"`,
+        row.expired ? formatDateCSV(row.expired) : '',
+        `"${(row.notes || '').replace(/"/g, '""')}"`,
+        `"${(row.web || '').replace(/"/g, '""')}"`,
+        `"${(row.credit || '').replace(/"/g, '""')}"`
+      ].join(',') + '\n';
+    });
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename=phone-tracker.csv');
+    res.send(csv);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('Export failed');
   }
 });
 
