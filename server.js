@@ -49,6 +49,7 @@ app.use(session({
   cookie: { maxAge: 30 * 24 * 60 * 60 * 1000 } // 30 days
 }));
 app.use(ipWhitelistMiddleware);
+app.use(require2FAIfNeeded);
 
 // Helper: require login
 function requireLogin(req, res, next) {
@@ -872,7 +873,9 @@ app.locals.formatDate = formatDateDDMMMYYYY;
 // ---------- Admin Routes ----------
 app.get('/admin/users', requireAdmin, async (req, res) => {
   try {
-    const usersResult = await db.query('SELECT id, email, role, twofa_enabled FROM users ORDER BY id');
+    const usersResult = await db.query(
+      'SELECT id, email, role, twofa_enabled, web_access, twofa_required FROM users ORDER BY id'
+    );
     const currentUserResult = await db.query('SELECT role FROM users WHERE id = $1', [req.session.userId]);
     res.render('admin/users', {
       users: usersResult.rows,
@@ -882,13 +885,7 @@ app.get('/admin/users', requireAdmin, async (req, res) => {
       role: currentUserResult.rows[0].role
     });
   } catch (err) {
-    res.render('admin/users', {
-      users: [],
-      error: 'Failed to load users',
-      success: null,
-      currentUserId: req.session.userId,
-      role: 'admin'
-    });
+    // … error handling
   }
 });
 
@@ -905,8 +902,10 @@ app.post('/admin/users/create', requireAdmin, async (req, res) => {
   const { email, password, role } = req.body;
   try {
     const hashed = await bcrypt.hash(password, 10);
-    await db.query('INSERT INTO users (email, password, role) VALUES ($1, $2, $3)',
-      [email, hashed, role || 'user']);
+    await db.query(
+      'INSERT INTO users (email, password, role, web_access, twofa_required) VALUES ($1, $2, $3, $4, $5)',
+      [email, hashed, role || 'user', web_access || null, req.body.twofa_required == '1' ? 1 : 0]
+    );
     res.redirect('/admin/users?success=User created');
   } catch (err) {
     const currentUserResult = await db.query('SELECT role FROM users WHERE id = $1', [req.session.userId]);
@@ -919,6 +918,10 @@ app.post('/admin/users/create', requireAdmin, async (req, res) => {
 
 app.get('/admin/users/:id/edit', requireAdmin, async (req, res) => {
   const targetUserId = req.params.id;
+  const userResult = await db.query(
+  'SELECT id, email, role, web_access, twofa_required FROM users WHERE id = $1',
+  [targetUserId]
+);
   try {
     const currentUserResult = await db.query('SELECT role FROM users WHERE id = $1', [req.session.userId]);
     const userResult = await db.query('SELECT id, email, role FROM users WHERE id = $1', [targetUserId]);
@@ -983,23 +986,50 @@ app.post('/admin/users/:id/whitelist/remove', requireAdmin, async (req, res) => 
 });
 
 app.post('/admin/users/:id/edit', requireAdmin, async (req, res) => {
-  const { email, password, role } = req.body;
+  // Destructure every field the form sends
+  const { email, password, role, web_access } = req.body;
+  const twofa_required = req.body.twofa_required === '1' ? 1 : 0;
   const userId = req.params.id;
+
   try {
     if (password && password.trim() !== '') {
       const hashed = await bcrypt.hash(password, 10);
-      await db.query('UPDATE users SET email = $1, password = $2, role = $3 WHERE id = $4',
-        [email, hashed, role, userId]);
+      await db.query(
+        `UPDATE users
+         SET email = $1, password = $2, role = $3, web_access = $4, twofa_required = $5
+         WHERE id = $6`,
+        [email, hashed, role, web_access || null, twofa_required, userId]
+      );
     } else {
-      await db.query('UPDATE users SET email = $1, role = $2 WHERE id = $3',
-        [email, role, userId]);
+      await db.query(
+        `UPDATE users
+         SET email = $1, role = $2, web_access = $3, twofa_required = $4
+         WHERE id = $5`,
+        [email, role, web_access || null, twofa_required, userId]
+      );
     }
     res.redirect('/admin/users?success=User updated');
   } catch (err) {
-    const currentUserResult = await db.query('SELECT role FROM users WHERE id = $1', [req.session.userId]);
-    const userResult = await db.query('SELECT id, email, role FROM users WHERE id = $1', [userId]);
+    // On error, re‑fetch the base user record and overwrite with the submitted values
+    const currentUserResult = await db.query(
+      'SELECT role FROM users WHERE id = $1',
+      [req.session.userId]
+    );
+    const userResult = await db.query(
+      'SELECT id, email, role, web_access, twofa_required FROM users WHERE id = $1',
+      [userId]
+    );
+    const user = userResult.rows[0];
+    if (user) {
+      // Keep the submitted values so the form shows exactly what the admin typed
+      user.email = email;
+      user.role = role;
+      user.web_access = web_access || null;
+      user.twofa_required = twofa_required;
+    }
+
     res.render('admin/edit-user', {
-      user: userResult.rows[0],
+      user,
       error: 'Update failed. Email may already exist.',
       role: currentUserResult.rows[0].role
     });
@@ -1017,6 +1047,69 @@ app.post('/admin/users/:id/delete', requireAdmin, async (req, res) => {
   } catch (err) {
     res.redirect('/admin/users?error=Delete failed');
   }
+});
+
+async function require2FAIfNeeded(req, res, next) {
+  // If not logged in, let requireLogin handle it
+  if (!req.session.userId) return next();
+
+  // Skip 2FA check for these paths
+  const skipPaths = ['/force-2fa', '/logout', '/login', '/verify-2fa'];
+  if (skipPaths.includes(req.path)) return next();
+
+  try {
+    const result = await db.query('SELECT twofa_required, twofa_enabled FROM users WHERE id = $1', [req.session.userId]);
+    const user = result.rows[0];
+    if (user && user.twofa_required == 1 && user.twofa_enabled != 1) {
+      return res.redirect('/force-2fa');
+    }
+    next();
+  } catch (err) {
+    next(err);
+  }
+}
+
+app.get('/force-2fa', requireLogin, async (req, res) => {
+  try {
+    const result = await db.query('SELECT twofa_required, twofa_enabled, email FROM users WHERE id = $1', [req.session.userId]);
+    const user = result.rows[0];
+    if (!user || user.twofa_required != 1 || user.twofa_enabled == 1) {
+      return res.redirect('/dashboard');
+    }
+    // Generate secret only if needed (store in session or regenerate each time)
+    const secret = speakeasy.generateSecret({ length: 20, name: `AI Apps (${user.email})` });
+    const qrCodeDataURL = await QRCode.toDataURL(secret.otpauth_url);
+    // Optionally store secret temporarily
+    req.session.tempTwofaSecret = secret.base32;
+    res.render('force-2fa', { qrCode: qrCodeDataURL, secret: secret.base32, error: null });
+  } catch (err) {
+    res.redirect('/dashboard');
+  }
+});
+
+app.post('/force-2fa', requireLogin, async (req, res) => {
+  const { token } = req.body;
+  const secret = req.session.tempTwofaSecret;
+  if (!secret) return res.redirect('/force-2fa');
+
+  const verified = speakeasy.totp.verify({ secret, encoding: 'base32', token, window: 1 });
+  if (verified) {
+    // Enable 2FA for user
+    await db.query('UPDATE users SET twofa_secret = $1, twofa_enabled = 1 WHERE id = $2', [secret, req.session.userId]);
+    delete req.session.tempTwofaSecret;
+    return res.redirect('/dashboard?success=2FA enabled');
+  } else {
+    res.render('force-2fa', { qrCode: null, secret, error: 'Invalid token. Try again.' });
+  }
+});
+
+// Deny – delete account
+app.post('/force-2fa/deny', requireLogin, async (req, res) => {
+  const userId = req.session.userId;
+  await db.query('DELETE FROM users WHERE id = $1', [userId]);
+  req.session.destroy(() => {
+    res.send('Account deleted because 2FA is required.');
+  });
 });
 
 // ---------- Tools ----------

@@ -19,7 +19,9 @@
         <form method="POST">
           <input type="email" name="email" placeholder="Email address" required>
           <input type="password" name="password" placeholder="Password" required>
-
+          <label>
+            <input type="checkbox" name="twofa_required" value="1" /> Force 2FA (user must enable 2FA on first login)
+          </label>
           <label>Role</label>
           <select name="role">
             <option value="admin">Admin (Full Access)</option>

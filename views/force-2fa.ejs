@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Enable 2FA · AI Apps</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body style="background: linear-gradient(135deg, #ff7a00 0%, #ffa64d 100%);">
+  <div class="auth-wrapper">
+    <div class="auth-card card">
+      <h2>🔐 Two‑Factor Authentication Required</h2>
+      <p>You must enable Google Authenticator to continue.</p>
+      <% if (typeof qrCode !== 'undefined' && qrCode) { %>
+        <img src="<%= qrCode %>" alt="QR Code" style="max-width:200px;">
+        <p>Secret: <code><%= secret %></code></p>
+      <% } %>
+      <% if (typeof error !== 'undefined' && error) { %><div class="alert alert-error"><%= error %></div><% } %>
+      <form method="POST" action="/force-2fa">
+        <input type="text" name="token" placeholder="6-digit code" required>
+        <button type="submit">Enable 2FA</button>
+      </form>
+      <form method="POST" action="/force-2fa/deny" onsubmit="return confirm('If you deny, your account will be deleted. Continue?');" style="margin-top:1rem;">
+        <button type="submit" class="secondary" style="background:#dc2626; color:white;">I don't want to enable 2FA (delete my account)</button>
+      </form>
+    </div>
+  </div>
+</body>
+</html>

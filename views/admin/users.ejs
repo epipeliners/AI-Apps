@@ -32,7 +32,7 @@
                 <th>Email</th>
                 <th>Role</th>
                 <th>Web</th>
-                <th>2FA</th>
+                <th>Force 2FA</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -43,7 +43,7 @@
                   <td><%= user.email %></td>
                   <td><%= user.role %></td>
                   <td><%= user.web_access || '-' %></td>
-                  <td><%= user.twofa_enabled ? '✅' : '❌' %></td>
+                  <td><%= user.twofa_required == 1 ? '✅' : '❌' %></td>
                   <td>
                     <a href="/admin/users/<%= user.id %>/edit" class="action-link">Edit</a>
                     <a href="/admin/users/<%= user.id %>/whitelist" class="action-link">Whitelist</a>

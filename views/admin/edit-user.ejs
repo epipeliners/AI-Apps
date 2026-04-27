@@ -3,33 +3,55 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Create User · Admin</title>
+  <title>Edit User · Admin</title>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-    <%- include('../partials/header', { role }) %>
+  <%- include('../partials/header', { role }) %>
 
-    <main>
+  <main>
     <div class="container">
       <div class="card" style="max-width:500px; margin:0 auto;">
-        <h2>➕ Edit User</h2>
+        <h2>✏️ Edit User</h2>
         <% if (typeof error !== 'undefined' && error) { %>
           <div class="alert alert-error"><%= error %></div>
         <% } %>
         <form method="POST">
-          <input type="email" name="email" placeholder="Email address" required>
-          <input type="password" name="password" placeholder="Password" required>
+          <input type="email" name="email" value="<%= user.email %>" required>
+
+          <label>New Password (leave blank to keep)</label>
+          <input type="password" name="password" placeholder="Leave blank to keep current">
+
+          <label>Role</label>
           <select name="role">
-            <option value="user">User</option>
-            <option value="admin">Admin</option>
+            <option value="admin" <%= user.role === 'admin' ? 'selected' : '' %>>Admin (Full Access)</option>
+            <option value="boss" <%= user.role === 'boss' ? 'selected' : '' %>>Boss (Full Access)</option>
+            <option value="leader" <%= user.role === 'leader' ? 'selected' : '' %>>Leader (HR Full + All Tools)</option>
+            <option value="cs" <%= user.role === 'cs' ? 'selected' : '' %>>CS (HR Own Data + Tools)</option>
+            <option value="joker" <%= user.role === 'joker' ? 'selected' : '' %>>Joker (HR Own Data + Tools)</option>
+            <option value="user" <%= user.role === 'user' ? 'selected' : '' %>>User (Calculator & Converter Only)</option>
           </select>
-          <button type="submit">Edit Account</button>
-          <a href="/admin/users"><button type="button" class="secondary" style="margin-top:0.5rem;">Cancel</button></a>
+
+          <label>Web Access (Phone Tracker)</label>
+          <% if (role === 'admin' || role === 'boss') { %>
+            <input type="text" name="web_access" value="<%= user.web_access || '' %>" placeholder="e.g., PANEN">
+          <% } else { %>
+            <input type="text" value="<%= user.web_access || '' %>" readonly disabled>
+            <input type="hidden" name="web_access" value="<%= user.web_access || '' %>">
+          <% } %>
+
+          <label>
+            <input type="checkbox" name="twofa_required" value="1" <%= user.twofa_required == 1 ? 'checked' : '' %> />
+            Force 2FA (user must enable 2FA on next login)
+          </label>
+
+          <button type="submit">Update User</button>
+          <a href="/admin/users"><button type="button" class="secondary">Cancel</button></a>
         </form>
       </div>
     </div>
   </main>
 
-    <%- include('../partials/footer', { role }) %>
+  <%- include('../partials/footer') %>
 </body>
 </html>
